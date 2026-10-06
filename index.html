@@ -3047,7 +3047,7 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('selectend', () => { const u = c.userData; u.hold = null; if (u.lobbyHeld) return lobbyRelease(u); if (u.hDrink) return hReleaseDrink(u); if (u.isHand) releaseItem(u); });
   c.addEventListener('squeezeend', () => { const u = c.userData; if (u.lobbyHeld) return lobbyRelease(u); if (u.hDrink) return hReleaseDrink(u); if (!u.isHand) releaseItem(u); });
   c.addEventListener('squeezestart', () => {
-    if (LOBBY.active) { if (!lobbyGrab(c)) recenter(); return; }
+    if (LOBBY.active) { lobbyGrab(c); return; } // 메인 화면: 그립은 디스크 잡기만 (테이블 위치는 안 바뀜)
     if (H.active) { if (hTryGrabDrink(c)) return; hRecenter(); return; }
     if (!c.userData.isHand && tryGrab(c)) return; // 컨트롤러: 그립으로 집기
     const mon = c.userData.ptr?.monitor;
@@ -3058,10 +3058,11 @@ for (let i = 0; i < 2; i++) {
   rig.add(grip);
   controllers.push(c);
 }
+function headLocal() { rig.updateMatrixWorld(true); return rig.worldToLocal(camera.getWorldPosition(new THREE.Vector3())); } // rig 기준 머리 위치
 function recenter() {
   if (LOBBY.active) return lobbyRecenter();
   if (H.active) return hRecenter();
-  const p = camera.position;
+  const p = headLocal();
   rig.position.set(XR_EYE.x - p.x, XR_EYE.y - p.y, XR_EYE.z - p.z);
 }
 renderer.xr.addEventListener('sessionstart', () => {
@@ -3528,7 +3529,7 @@ function hGoto(loc, instant = false) {
 function hRecenter() {
   const L = H_LOCS[H.loc];
   if (renderer.xr.isPresenting) {
-    const p = camera.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), L.yaw);
+    const p = headLocal().applyAxisAngle(new THREE.Vector3(0, 1, 0), L.yaw);
     rig.position.set(L.pos.x - p.x, 0, L.pos.z - p.z);
   } else rig.position.set(L.pos.x, 0, L.pos.z);
 }
@@ -4811,6 +4812,12 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
+  c.textAlign = 'right'; c.fillText('build 1006-h5', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
+    camera.getWorldPosition(_lv);
+    c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
+  }
+  c.textAlign = 'left';
   if (LOBBY.starting) { c.fillStyle = green; c.font = `800 34px ${FONT}`; c.fillText(TR('불러오는 중', 'LOADING') + '.'.repeat(1 + Math.floor(t * 3) % 3), 18, 200); }
   else if (!d) {
     c.fillStyle = green; c.font = `800 30px ${FONT}`; c.fillText(TR('디스크를 넣으세요', 'INSERT DISK') + cursor, 18, 150);
@@ -4912,12 +4919,14 @@ function lobbyRelease(u) { // 놓으면: 드라이브 근처면 쏙, 아니면 �
   if (d.g.position.distanceTo(SLOT) < 0.09) lobbyInsert(d);
   else d.anim = { t: 0, from: d.g.position.clone(), fromQ: d.g.quaternion.clone(), insert: false };
 }
+const _lrc = new THREE.Vector3();
 const LOBBY_EYE_DROP = 0.72; // AR: 테이블 윗면이 눈보다 이만큼(m) 아래
 function lobbyRecenter() {
   if (renderer.xr.isPresenting) {
-    const p = camera.position, head = p.y; // 내 눈높이 (기기가 바닥을 모르면 0 근처일 수도 있음 → 그대로 써서 '눈 기준'으로 맞춤)
-    rig.position.set(LOBBY_SPOT.x - p.x, STAND_Y + LOBBY_EYE_DROP - head, LOBBY_SPOT.z - p.z); // 테이블 윗면 = 눈보다 LOBBY_EYE_DROP 아래
-    LOBBY.fitT = 0;
+    // 기기 기준 머리 위치 = 실제(월드) 위치 − rig 위치. (camera.position을 그대로 쓰면 누를수록 조금씩 밀려서 점점 낮아졌음)
+    camera.getWorldPosition(_lrc);
+    const hx = _lrc.x - rig.position.x, hy = _lrc.y - rig.position.y, hz = _lrc.z - rig.position.z;
+    rig.position.set(LOBBY_SPOT.x - hx, STAND_Y + LOBBY_EYE_DROP - hy, LOBBY_SPOT.z - hz); // 테이블 윗면 = 눈보다 LOBBY_EYE_DROP 아래
   }
   else rig.position.set(0.06, 0, STAND_Z + 0.9); // PC: 컴퓨터 · 키보드 · 디스크가 화면 가득
 }
@@ -4933,8 +4942,8 @@ function lobbyUpdate(dt, t) {
   LOBBY.scene.background = vr ? null : LOBBY_BG;  // AR: 패스스루(내 방)가 보이게
   for (const o of LOBBY.pcOnly) o.visible = !vr;
   for (const o of LOBBY.legs) o.visible = !vr;
-  if (vr && (LOBBY.fitT ?? 0) < 3) { LOBBY.fitT = (LOBBY.fitT ?? 0) + dt; rig.position.y = STAND_Y + LOBBY_EYE_DROP - camera.position.y; }
-  if (!vr) LOBBY.fitT = 0;
+  if (vr && !LOBBY.fitted) { LOBBY.fitT = (LOBBY.fitT ?? 0) + dt; if (LOBBY.fitT > 1) { LOBBY.fitted = true; lobbyRecenter(); } } // AR 시작 1초 뒤 한 번만 높이 맞춤
+  if (!vr) { LOBBY.fitT = 0; LOBBY.fitted = false; }
   if (vr) { LOBBY.neon.position.set(0, 1.95, -2.8); LOBBY.neon.scale.setScalar(1); } // AR: 멀리 크게
   else { LOBBY.neon.position.set(0.04, 1.4, -1.5); LOBBY.neon.scale.setScalar(0.5); } // PC: 컴퓨터 바로 뒤 위
   if (LOBBY.starting) lobbyStartUpdate(dt);
