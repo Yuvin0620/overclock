@@ -4915,7 +4915,7 @@ function lobbyRelease(u) { // 놓으면: 드라이브 근처면 쏙, 아니면 �
 const LOBBY_EYE_DROP = 0.72; // AR: 테이블 윗면이 눈보다 이만큼(m) 아래
 function lobbyRecenter() {
   if (renderer.xr.isPresenting) {
-    const p = camera.position, head = clamp(p.y, 0.9, 2.1); // 바닥 기준 내 눈높이
+    const p = camera.position, head = p.y; // 내 눈높이 (기기가 바닥을 모르면 0 근처일 수도 있음 → 그대로 써서 '눈 기준'으로 맞춤)
     rig.position.set(LOBBY_SPOT.x - p.x, STAND_Y + LOBBY_EYE_DROP - head, LOBBY_SPOT.z - p.z); // 테이블 윗면 = 눈보다 LOBBY_EYE_DROP 아래
     LOBBY.fitT = 0;
   }
@@ -4933,7 +4933,7 @@ function lobbyUpdate(dt, t) {
   LOBBY.scene.background = vr ? null : LOBBY_BG;  // AR: 패스스루(내 방)가 보이게
   for (const o of LOBBY.pcOnly) o.visible = !vr;
   for (const o of LOBBY.legs) o.visible = !vr;
-  if (vr && (LOBBY.fitT ?? 0) < 3) { LOBBY.fitT = (LOBBY.fitT ?? 0) + dt; if (camera.position.y > 0.6) rig.position.y = STAND_Y + LOBBY_EYE_DROP - clamp(camera.position.y, 0.9, 2.1); }
+  if (vr && (LOBBY.fitT ?? 0) < 3) { LOBBY.fitT = (LOBBY.fitT ?? 0) + dt; rig.position.y = STAND_Y + LOBBY_EYE_DROP - camera.position.y; }
   if (!vr) LOBBY.fitT = 0;
   if (vr) { LOBBY.neon.position.set(0, 1.95, -2.8); LOBBY.neon.scale.setScalar(1); } // AR: 멀리 크게
   else { LOBBY.neon.position.set(0.04, 1.4, -1.5); LOBBY.neon.scale.setScalar(0.5); } // PC: 컴퓨터 바로 뒤 위
