@@ -1,0 +1,5 @@
+backup/
+*.pdf
+node_modules/
+.netlify/
+*.blend1
