@@ -2609,6 +2609,7 @@ function actEject() {
   if (G.complaints >= 3) { G.state = 'ending'; setTimeout(() => showEnd(ENDINGS.closed, 0.88), 2600); }
 }
 function actDJ() {
+  if (PVP.on && PVP.role === 'sec' && canAct()) return pvpRally();
   if (G.state === 'choice') return choose('dance');
   if (G.state === 'title') return startHuman(); // 대기 화면에서 레버 = 인간 모드
   if (!canAct()) return notReady();
@@ -3086,7 +3087,7 @@ renderer.domElement.addEventListener('wheel', (e) => {
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (e.button === 2) { updatePointers(); room.toggleFocus(mouse.ptr?.monitor, camera); audio.sfx('click'); return; }
   if (e.button !== 0) return; mouse.down = { x: e.clientX, y: e.clientY, yaw, pitch }; mouse.moved = false;
-  if (H.active) { if (G.state === 'end') return; mouse.ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); if (hClickDrink()) return; if (H.enc?.kind === 'choice') hEncChoose(e.clientX < innerWidth / 2 ? 0 : 1); else humanHit(); return; }
+  if (H.active) { if (G.state === 'end') return; mouse.ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); if (hClickWalk() || hClickDrink()) return; if (H.enc?.kind === 'choice') hEncChoose(e.clientX < innerWidth / 2 ? 0 : 1); else humanHit(); return; }
   updatePointers();
   mouse.lever = mouse.ptr?.button === room.buttons.dj ? { a0: room.buttons.dj.pivot.rotation.x } : null;
 });
@@ -3115,6 +3116,7 @@ addEventListener('keydown', (e) => {
   if (H.active) {
     if (e.code === 'KeyF') H.keyFace = true;
     else if (e.code === 'KeyR') H.keyRaise = 0.6;
+    else if (e.code === 'KeyM' && !e.repeat) hWalk();
     else if (e.code === 'Digit1' || e.code === 'ArrowLeft') hEncChoose(0);
     else if (e.code === 'Digit2' || e.code === 'ArrowRight') hEncChoose(1);
     else if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) { e.preventDefault(); if (G.state === 'end') { if (G.endT <= 0) location.reload(); } else humanHit(); }
@@ -3468,7 +3470,7 @@ function startHuman(mode = 'auto') { // 'tut' 튜토리얼 · 'play' 1일차부�
     controllers.forEach((c) => { c.userData.line.visible = false; c.userData.dot.visible = false; });
     camera.position.set(0, 1.62, 0);
     if (renderer.xr.isPresenting) PSX.club.value.set(0, 0);
-    document.getElementById('help').style.display = 'block'; document.getElementById('help').textContent = TR('Space/클릭 = 박자 · F 꾹 = 얼굴에 손(땀·재채기·마시기·얼음) · 1/2 = 대답 · R = 손 들기 · 드래그 = 둘러보기', 'Space/click = beat · hold F = hand to face (sweat/sneeze/drink/ice) · 1/2 = answer · R = raise hand · drag = look');
+    document.getElementById('help').style.display = 'block'; document.getElementById('help').textContent = TR('Space/클릭 = 박자 · F 꾹 = 얼굴에 손(땀·재채기·마시기·얼음) · 1/2 = 대답 · R = 손 들기 · M = 바↔플로어 이동 · 드래그 = 둘러보기', 'Space/click = beat · hold F = hand to face (sweat/sneeze/drink/ice) · 1/2 = answer · R = raise hand · drag = look');
     hHud.mesh.visible = true;
     const tutDone = mode === 'play' || (mode === 'auto' && !!lsGet('overclock.humanTut'));
     hStartNight(H.pvp || tutDone ? 0 : -1); // 처음이면 수습 잠입(튜토리얼)부터
@@ -3511,6 +3513,7 @@ function hStartNight(i) { // i = -1: 튜토리얼(수습 잠입)
 }
 function hGoto(loc, instant = false) {
   const apply = () => {
+    if (H.walkCD < 2.9) H.stay = false; // 이벤트(DJ 호출 등)로 이동 → 춤 끝나면 자동 복귀
     H.loc = loc;
     const L = H_LOCS[loc];
     rig.rotation.y = L.yaw; yaw = 0; pitch = loc === 'bar' ? -0.12 : -0.05;
@@ -3584,10 +3587,11 @@ function humanHit() {
   if (hRest(n)) return hAddSus(5, TR('쉬는 박인데 움직임', 'Moved on a rest'));
   if (H.hits.has(n)) return hAddSus(3, TR('두 번 침', 'Double hit'));
   H.hits.add(n);
-  if (H.pvp) PVP.acc = err < 0.2 ? Math.min(1, PVP.acc + 0.25) : PVP.acc * 0.75;
+  const P1 = H.pvp ? 0.075 : 0.11, P2 = H.pvp ? 0.135 : 0.2; // 대결: 판정 창이 좁음
+  if (H.pvp) PVP.acc = err < P2 ? Math.min(1, PVP.acc + 0.2) : PVP.acc * 0.65;
   const inBattle = H.enc?.kind === 'battle' && n >= H.enc.n0 && n <= H.enc.n0 + 3;
-  if (err < 0.11) { H.combo++; if (inBattle) H.enc.good++; if (H.tutorial) HT.hits++; hAddSus(-2.5, TR('완벽', 'PERFECT')); if (H.combo === 12) hChat(pick(HL.combo)); }
-  else if (err < 0.2) { H.combo++; if (inBattle) H.enc.good++; if (H.tutorial) HT.hits++; hAddSus(-0.5, TR('좋아', 'GOOD')); }
+  if (err < P1) { H.combo++; if (inBattle) H.enc.good++; if (H.tutorial) HT.hits++; hAddSus(-2.5, TR('완벽', 'PERFECT')); if (H.combo === 12) hChat(pick(HL.combo)); }
+  else if (err < P2) { H.combo++; if (inBattle) H.enc.good++; if (H.tutorial) HT.hits++; hAddSus(-0.5, TR('좋아', 'GOOD')); }
   else hAddSus(6, TR('박자 어긋남', 'Off beat'));
   for (const c of controllers) haptic(c, 0.3, 25);
 }
@@ -4163,13 +4167,13 @@ function updateHuman(dt, t) {
     // 플로어: 박자 판정 & 춤 끝나면 바로 복귀
     if (H.dancing && beat != null && !hFrozen()) {
       if (H.judged < 0) H.judged = Math.floor(beat) + 1;
-      if (H.grace === -2) { H.grace = Math.floor(beat) + 5; H.danceEnd = H.grace + 16; }
+      if (H.grace === -2) { H.grace = Math.floor(beat) + (H.rally ? 3 : 5); H.danceEnd = H.grace + (H.rally ? 24 : H.stay ? 1e9 : 16); if (H.rally) H.rallyEnd = H.danceEnd; H.rally = false; }
       const lateBy = 0.22 * (audio.liveBpm || 120) / 60;
       if (beat - H.judged > 6) H.judged = Math.floor(beat);
       while (H.judged + lateBy < beat) {
         const n = H.judged++;
         if (!hRest(n) && !hGrace(n) && !H.hits.has(n) && !(H.freeze && H.freeze.phase === 'warn')) {
-          PVP.acc *= 0.7; hAddSus(H.face > 0.2 ? 2 : 4, TR('박자 놓침', 'Missed beat'));
+          PVP.acc *= 0.6; hAddSus(H.face > 0.2 ? 2 : 4, TR('박자 놓침', 'Missed beat'));
           if (++H.misses >= 4) { H.misses = 0; if (H.msgT <= 0) hChat(pick(HL.miss)); }
         } else if (H.hits.has(n)) H.misses = 0;
       }
@@ -4204,6 +4208,7 @@ function updateHuman(dt, t) {
   // UI: 시선 따라오기 + 감시 중이면 화면 테두리 빨갛게
   hFollowUI(dt);
   hVrUi(dt, t);
+  hWalkUpdate(dt);
   hVig.mesh.visible = !H.ending;
   { // 테두리 판을 실제 시야 크기에 맞춤 (VR은 시야가 넓어서 넉넉히)
     const hh = renderer.xr.isPresenting ? 0.36 : 0.3 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -4413,6 +4418,66 @@ function hVrUi(dt, t) {
       if (k > 0.3) for (const c of controllers) haptic(c, 0.15 + 0.45 * k, 45);
     }
   } else H.hbT = 0;
+}
+
+// ── 직접 이동: 바 ↔ 댄스플로어 (PC: M 키 / 표지판 클릭 · VR: A/X 버튼 / 표지판을 손가락으로 톡) ──
+const hWalkSign = new CanvasPanel(0.26, 0.085, 520, 170, { transparent: true });
+hWalkSign.mesh.renderOrder = 40; hWalkSign.material.fog = false; hWalkSign.mesh.visible = false;
+club.scene.add(hWalkSign.mesh);
+let hWalkKey = '';
+function hCanWalk() { return H.active && !H.ending && !H.between && !H.moving && !H.enc && !hFrozen() && !(H.freeze?.phase === 'warn') && !(H.walkCD > 0) && !H.tutorial; }
+function hWalk() {
+  if (!hCanWalk()) { audio.sfx('deny'); return; }
+  const to = H.loc === 'bar' ? 'floor' : 'bar';
+  const beat = audio.beat() ?? 0;
+  if (to === 'bar' && H.rallyEnd > beat) hAddSus(10, TR('소집 중 이탈!', 'Left during rally!')); // 대결: 소집 춤 도중에 빠지면 수상
+  H.walkCD = 3; H.stay = to === 'floor';
+  audio.sfx('click');
+  hGoto(to);
+}
+function drawWalkSign() {
+  const on = hCanWalk() || H.walkCD > 0, toFloor = H.loc === 'bar', vr = renderer.xr.isPresenting;
+  const key = `${toFloor}|${on}|${vr}|${LANG}`; if (key === hWalkKey) return; hWalkKey = key;
+  const { ctx: c, w, h } = hWalkSign;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = on ? 'rgba(20,10,30,.88)' : 'rgba(20,20,20,.5)'; roundRect(c, 4, 4, w - 8, h - 8, 30); c.fill();
+  c.strokeStyle = on ? '#ff5c8a' : '#555'; c.lineWidth = 5; roundRect(c, 4, 4, w - 8, h - 8, 30); c.stroke();
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = on ? '#ffe3ea' : '#888'; c.font = `900 52px ${FONT}`;
+  c.fillText(toFloor ? TR('댄스플로어로 ▶', 'TO DANCE FLOOR ▶') : TR('◀ 바로', '◀ TO THE BAR'), w / 2, 66);
+  c.fillStyle = on ? '#ffb0c4' : '#777'; c.font = `700 26px ${FONT}`;
+  c.fillText(vr ? TR('A/X 버튼 · 손가락으로 톡', 'A/X button · tap with finger') : TR('M 키 · 클릭', 'M key · click'), w / 2, 128);
+  hWalkSign.commit();
+}
+const _ws = new THREE.Vector3(), _wt = new THREE.Vector3();
+function hWalkUpdate(dt) {
+  H.walkCD = Math.max(0, (H.walkCD || 0) - dt);
+  const show = H.active && !H.ending && !H.between && !H.tutorial;
+  hWalkSign.mesh.visible = show && !H.moving;
+  if (!show) return;
+  // 지금 자리 앞 오른쪽 아래 (손 닿는 거리)
+  const L = H_LOCS[H.loc];
+  hWalkSign.mesh.position.copy(L.pos).addScaledVector(hFwd(L.yaw), 0.55).addScaledVector(hRight(L.yaw), 0.4); hWalkSign.mesh.position.y = 1.22;
+  camera.getWorldPosition(_hp); hWalkSign.mesh.lookAt(_hp);
+  drawWalkSign();
+  // VR: A/X 버튼, 손가락으로 표지판 톡
+  hWalkSign.mesh.getWorldPosition(_ws);
+  for (const c of controllers) {
+    const u = c.userData;
+    const btn = !!u.input?.gamepad?.buttons?.[4]?.pressed;
+    if (btn && !u.walkBtn) hWalk();
+    u.walkBtn = btn;
+    const tip = tipOf(u); let near = false;
+    if (tip) { tip.getWorldPosition(_wt); near = _wt.distanceTo(_ws) < 0.08; }
+    if (near && !u.walkPoke) { haptic(c, 0.5, 40); hWalk(); }
+    u.walkPoke = near;
+  }
+}
+function hClickWalk() { // PC: 표지판 클릭
+  if (!hWalkSign.mesh.visible) return false;
+  raycaster.setFromCamera(mouse.ndc, camera);
+  if (!raycaster.intersectObject(hWalkSign.mesh).length) return false;
+  hWalk(); return true;
 }
 
 // ── HUD ─────────────────────────────
@@ -4955,7 +5020,7 @@ const PVP_PRIV_ID = (code) => 'club-overclock-pvp-v3-priv-' + code; // 비공개
 const PVP_CODES = []; for (const a of '123') for (const b of '123') for (const c of '123') PVP_CODES.push(a + b + c); // 방 27개
 const PVP_NIGHT = {
   title: TR('대결 · 인간 vs 감시로봇', 'VERSUS · Humans vs Security'), duration: PVP_DUR, scans: 3,
-  initial: [robot(), robot(), robot(['wig']), robot(), robot(['rust']), robot(), robot(['coolant']), robot(), robot(['tape']), robot(), robot(['wig']), robot(), robot()],
+  initial: Array.from({ length: 13 }, () => robot()), // 대결: 진짜 인간 말고는 전부 평범한 로봇 (가발·녹·냉각수·테이프 같은 헷갈리는 장식 없음)
   spawns: [], brief: [], barks: [],
 };
 const H_PVP = { n: 1, dur: PVP_DUR, pool: { order: 2, talk: 3, floor: 3, offer: 1 }, urges: true,
@@ -5136,6 +5201,7 @@ function pvpHumanData(m) {
   if (m.t === 'full') { pvpFail(m.started ? TR('이미 시작한 방이에요.', 'That game already started.') : TR(`방이 꽉 찼어요 (인간 최대 ${PVP_MAX}명).`, `Room is full (max ${PVP_MAX} humans).`)); return; }
   if (m.t === 'start') { PVP.slot = m.slot; PVP.total = m.total; pvpApplySlot(m.slot); PVP.on = true; PVP.over = false; PVP.acc = 1; PVP.stage = 'go'; audio.sfx('scanDone'); LOBBY.starting = { t: 0, kind: 'pvp', mode: 'human' }; return; }
   if (m.t === 'end') { if (!PVP.over) { PVP.over = true; PVP.why = m.why; if (H.active && !H.ending) hEnd(m.winner === 'human'); } return; }
+  if (m.t === 'rally') return pvpHumanRally();
   if (m.t === 's') {
     if (m.sc && !PVP.scan && H.active && !H.ending) { audio.sfx('scan'); hSay(TR('(경고) 감시로봇이 나를 스캔하고 있다!', '(WARNING) The security robot is scanning me!'), 3); }
     PVP.watch = !!m.w; PVP.scan = !!m.sc;
@@ -5215,10 +5281,15 @@ function pvpBeginSec() {
     };
     pl.avatar = p;
   }
+  PVP.rallies = 2; PVP.rallyT = 0;
+  for (const s of club.spots) if (s.type === 'bar' && !s.occ) { // ① 남은 바 의자는 전부 로봇으로 (바에 오래 있는 것만으론 티 안 나게)
+    const r = club.patrons.find((p) => p.alive && p.role === 'guest' && !p.pvpPlayer && p.spot?.type !== 'bar');
+    if (r) { if (r.spot) r.spot.occ = null; s.occ = r; r.spot = s; r.root.position.copy(s.pos); r.face = s.face; r.root.rotation.y = s.face; r.state = 'idle'; r.spotType = 'idle'; r.target = null; }
+  }
   G.state = 'night';
   const n = PVP.players.size;
-  bark(BENE, TR(`대결 모드입니다, 사장님. 손님 중 ${n}명은 '진짜' 인간 플레이어예요. ${PVP_DUR}초 안에 전부 찾아서 귀가시키세요. 스캔 3회, 민원 3건이면 패배.`,
-    `Versus mode, boss. ${n} of the guests are REAL human players. Find and eject them all within ${PVP_DUR} seconds. 3 scans; 3 complaints and you lose.`), 9);
+  bark(BENE, TR(`대결 모드입니다, 사장님. 손님 중 ${n}명은 '진짜' 인간 플레이어예요. ${PVP_DUR}초 안에 전부 찾아서 귀가시키세요. 스캔 3회, 민원 3건이면 패배. 노란 레버 = 플로어 소집(2번): 전원을 플로어로 불러 춤을 시켜요.`,
+    `Versus mode, boss. ${n} of the guests are REAL human players. Find and eject them all within ${PVP_DUR} seconds. 3 scans; 3 complaints and you lose. Yellow lever = floor rally (x2): sends everyone to dance.`), 9);
 }
 function pvpAvatarUpdate(pl) {
   const p = pl.avatar, r = pl.remote;
@@ -5229,17 +5300,25 @@ function pvpAvatarUpdate(pl) {
     p.target = L.pos.clone(); p.faceAfter = L.yaw + Math.PI; p.spotType = r.d ? 'dance' : 'idle';
   }
   if (!p.target) p.state = r.d ? 'dance' : 'idle';
-  const off = r.d && r.acc < 0.55, has = p.tells.includes('offbeat');
+  const off = r.d && r.acc < 0.7, has = p.tells.includes('offbeat');
   if (off && !has) p.tells.push('offbeat'); else if (!off && has) p.tells.splice(p.tells.indexOf('offbeat'), 1);
   p.remoteFace = !!r.f;
   p.sweaty = r.sw > 55 || p.dripT > 0;
+  // ③ 의심 단서: 40%부터 머리 위가 붉게, 65%부터 근처 로봇들이 쳐다봄
+  if (!p.susGlow) { p.susGlow = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2030, transparent: true, opacity: 0, depthWrite: false })); p.susGlow.scale.set(1, 0.35, 1); p.susGlow.position.y = 2.25; p.susGlow.raycast = () => {}; p.root.add(p.susGlow); }
+  const k = clamp(((r.sus || 0) - 40) / 60, 0, 1);
+  p.susGlow.material.opacity = k * (0.35 + 0.15 * Math.sin(performance.now() / 180));
+  if ((r.sus || 0) > 65) for (const o of club.patrons) if (o !== p && o.alive && o.role === 'guest' && !o.pvpPlayer && !o.target && o.root.position.distanceTo(p.root.position) < 2.5) { o.face = Math.atan2(p.root.position.x - o.root.position.x, p.root.position.z - o.root.position.z); if (o.state === 'dance' && Math.random() < 0.01) o.state = 'idle'; }
 }
 let pvpDecoyT = 12;
 function pvpDecoys(dt) { // 바 ↔ 플로어를 오가는 로봇들 (인간만 움직이면 티 나니까)
   pvpDecoyT -= dt; if (pvpDecoyT > 0) return;
-  pvpDecoyT = rand(6, 11);
+  pvpDecoyT = rand(3.5, 7);
   const cand = club.patrons.filter((p) => p.alive && p.role === 'guest' && !p.pvpPlayer && !p.target);
-  if (cand.length) club.assign(pick(cand), Math.random() < 0.5 ? 'bar' : 'dance');
+  if (!cand.length) return;
+  const atBar = cand.filter((p) => p.spot?.type === 'bar'), elsewhere = cand.filter((p) => p.spot?.type !== 'bar');
+  if (atBar.length && Math.random() < 0.5) { const a = pick(atBar), b = pick(elsewhere.length ? elsewhere : cand); club.assign(a, 'dance'); if (b !== a) club.assign(b, 'bar'); } // 바 자리 교대
+  else club.assign(pick(cand), Math.random() < 0.5 ? 'bar' : 'dance');
 }
 
 // ── 매 프레임 (양쪽 공통) ──
@@ -5263,6 +5342,7 @@ function pvpTick(dt) {
   if (PVP.role === 'sec') {
     if (G.state !== 'night') return;
     for (const pl of PVP.players.values()) pvpAvatarUpdate(pl);
+    if (PVP.rallyT > 0) { PVP.rallyT -= dt; if (PVP.rallyT <= 0) club.party = 0; }
     pvpDecoys(dt);
     if (PVP.sendT <= 0) {
       PVP.sendT = 0.2;
@@ -5272,6 +5352,25 @@ function pvpTick(dt) {
     if (!H.dancing) PVP.acc = Math.min(1, PVP.acc + dt * 0.3);
     if (PVP.sendT <= 0) { PVP.sendT = 0.12; pvpSend({ t: 'h', loc: H.loc, d: H.dancing, acc: PVP.acc, sw: H.sweat, f: H.face > 0.2, sus: H.sus }); }
   }
+}
+function pvpRally() { // 감시로봇: 전원 댄스플로어로! → 로봇은 칼박, 인간은 따라가서 박자 맞춰야
+  room.buttons.dj.push();
+  if (PVP.rallies <= 0) return deny(TR('소집은 다 썼어요.', 'No rallies left.'));
+  if (PVP.rallyT > 0) return deny(TR('소집 중이에요.', 'Rally in progress.'));
+  PVP.rallies--; PVP.rallyT = 14;
+  audio.sfx('alarm'); club.party = 0.6;
+  bark(BENE, TR(`전원 댄스플로어로! 로봇은 박자를 틀리지 않습니다. (소집 ${PVP.rallies}번 남음)`, `Everyone to the dance floor! Robots never miss a beat. (${PVP.rallies} rallies left)`), 5);
+  for (const p of club.patrons) if (p.alive && p.role === 'guest' && !p.pvpPlayer) { club.assign(p, 'dance'); p.speed = 2.2; p.wanderT = rand(18, 26); }
+  for (const pl of PVP.players.values()) if (!pl.out) pvpSendTo(pl, { t: 'rally' });
+}
+function pvpHumanRally() { // 인간: 소집 방송 → 잠깐 뒤 플로어로, 평소보다 길게 춤
+  if (!H.active || H.ending || H.between) return;
+  audio.sfx('alarm');
+  hSay(TR('BENE-9 (방송): 「전원 댄스플로어로! 지금 바로! 로봇은 박자를 틀리지 않습니다.」', 'BENE-9 (PA): "Everyone to the dance floor! Now! Robots never miss a beat."'), 4);
+  H.enc = null; encHand.visible = false; hRemoveDrink();
+  if (H.loc === 'floor') { const e = Math.floor(audio.beat() ?? 0) + 24; if (!H.stay) H.danceEnd = Math.max(H.danceEnd, e); H.rallyEnd = e; return; }
+  H.rally = true;
+  setTimeout(() => { if (H.active && !H.ending) hGoto('floor'); }, 1500);
 }
 function pvpHumanWatch() { // 인간 쪽: 감시 카메라 = 감시로봇이 나를 선택했을 때
   if (PVP.watch && !H.watch) { audio.sfx('tick'); if (!H.enc) hSay(TR('감시로봇이 나를 보고 있다! (실수하면 의심 2배)', 'The security robot is watching me! (mistakes count double)'), 3); }
