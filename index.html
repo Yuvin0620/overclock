@@ -4732,7 +4732,7 @@ const DISC_INFO = {
 function lobbyOptions() {
   const d = LOBBY.inserted; if (!d) return [];
   const info = DISC_INFO[d.kind], opts = [];
-  if (d.kind === 'pvp') return [{ label: TR('감시로봇 대기열', 'Security queue') }, { label: TR('인간 대기열', 'Human queue') }, { label: TR('코드로 참가 · 인간', 'Join by code · Human') }];
+  if (d.kind === 'pvp') return [{ label: TR('감시로봇 (방 열기)', 'Security (host)') }, { label: TR('인간 대기열', 'Human queue') }, { label: TR('코드로 참가 · 인간', 'Join by code · Human') }];
   if (!lsGet(info.tut)) opts.push({ mode: 'tut', label: TR('튜토리얼', 'Tutorial') });
   opts.push({ mode: 'play', label: TR('플레이', 'Play') });
   if (d.kind === 'oil') opts.push({ mode: 'hard', label: TR('하드 모드', 'Hard mode'), locked: !lsGet('overclock.cleared') });
@@ -4951,6 +4951,7 @@ async function pvpIce() {
   return [...PVP_ICE, ...PVP_TURN];
 }
 const PVP_ID = (code) => 'club-overclock-pvp-v3-' + code;
+const PVP_PRIV_ID = (code) => 'club-overclock-pvp-v3-priv-' + code; // 비공개 방: 인간 대기열엔 안 잡히고 코드로만
 const PVP_CODES = []; for (const a of '123') for (const b of '123') for (const c of '123') PVP_CODES.push(a + b + c); // 방 27개
 const PVP_NIGHT = {
   title: TR('대결 · 인간 vs 감시로봇', 'VERSUS · Humans vs Security'), duration: PVP_DUR, scans: 3,
@@ -4982,11 +4983,11 @@ function pvpSend(m) { try { if (PVP.conn?.open) PVP.conn.send(m); } catch {} }  
 function pvpSendTo(pl, m) { try { if (pl.conn?.open) pl.conn.send(m); } catch {} }      // 감시로봇 → 인간 한 명
 
 // ── 방 만들기 (감시로봇) ──
-async function pvpHost(idx = 0) {
-  PVP.role = 'sec'; PVP.stage = 'hosting'; PVP.err = ''; PVP.ready = false;
-  PVP.code = PVP_CODES[idx % PVP_CODES.length];
+async function pvpHost(idx = 0, priv = false) {
+  PVP.role = 'sec'; PVP.stage = 'hosting'; PVP.err = ''; PVP.ready = false; PVP.priv = priv;
+  PVP.code = priv ? pick(PVP_CODES) : PVP_CODES[idx % PVP_CODES.length]; // 비공개는 무작위 번호
   let peer;
-  try { peer = await pvpNewPeer(PVP_ID(PVP.code)); } catch (e) { return pvpFail(TR('PeerJS를 불러오지 못했어요 (인터넷 확인).', 'Could not load PeerJS (check internet).')); }
+  try { peer = await pvpNewPeer((priv ? PVP_PRIV_ID : PVP_ID)(PVP.code)); } catch (e) { return pvpFail(TR('PeerJS를 불러오지 못했어요 (인터넷 확인).', 'Could not load PeerJS (check internet).')); }
   if (PVP.stage !== 'hosting') { peer.destroy(); return; } // 그새 디스크를 뺐음
   PVP.peer = peer;
   peer.on('open', () => { PVP.ready = true; });
@@ -4995,7 +4996,7 @@ async function pvpHost(idx = 0) {
     if (PVP.peer !== peer) return clearInterval(PVP.keep);
     if (peer.disconnected && !peer.destroyed && PVP.stage === 'hosting') { try { peer.reconnect(); } catch {} }
   }, 4000);
-  peer.on('error', (e) => { if (e.type === 'unavailable-id') { peer.destroy(); if (PVP.stage === 'hosting') pvpHost(idx + 1); } else if (!PVP.on && e.type !== 'peer-unavailable') pvpFail(pvpErrText(e)); });
+  peer.on('error', (e) => { if (e.type === 'unavailable-id') { peer.destroy(); if (PVP.stage === 'hosting') pvpHost(idx + 1, priv); } else if (!PVP.on && e.type !== 'peer-unavailable') pvpFail(pvpErrText(e)); });
   peer.on('connection', (conn) => {
     conn.on('open', () => {
       if (PVP.on || PVP.stage !== 'hosting' || PVP.players.size >= PVP_MAX) { conn.send({ t: 'full', started: PVP.on }); setTimeout(() => conn.close(), 300); return; }
@@ -5064,7 +5065,7 @@ async function pvpJoin(code) {
   PVP.peer = peer;
   let tries = 0;
   const tryConnect = () => {
-    const conn = peer.connect(PVP_ID(code), { reliable: true, serialization: 'json' });
+    const conn = peer.connect((tries % 2 ? PVP_ID : PVP_PRIV_ID)(code), { reliable: true, serialization: 'json' }); // 비공개 방 먼저, 없으면 공개 방
     PVP.conn = conn;
     conn.on('data', pvpHumanData);
     conn.on('close', pvpHostLost);
@@ -5072,7 +5073,7 @@ async function pvpJoin(code) {
   };
   peer.on('error', (e) => {
     if (PVP.on) return;
-    if (e.type === 'peer-unavailable' && ++tries < 6 && PVP.stage === 'connecting') { PVP.retry = tries; setTimeout(() => { if (PVP.stage === 'connecting') tryConnect(); }, 1500); return; }
+    if (e.type === 'peer-unavailable' && ++tries < 8 && PVP.stage === 'connecting') { PVP.retry = Math.ceil(tries / 2); setTimeout(() => { if (PVP.stage === 'connecting') tryConnect(); }, tries % 2 ? 200 : 1500); return; }
     pvpFail(pvpErrText(e));
   });
   peer.on('open', () => {
@@ -5256,7 +5257,7 @@ function pvpQueueTick(dt) { // 감시로봇 대기열: 인간이 1명 이상이�
   if (PVP.qT <= 0) { PVP.qT = 0.5; for (const pl of PVP.players.values()) pvpSendTo(pl, { t: 'q', n, cd: PVP.cd }); }
 }
 function pvpTick(dt) {
-  if (PVP.stage === 'hosting' && !PVP.on) return pvpQueueTick(dt);
+  if (PVP.stage === 'hosting' && !PVP.on) { if (PVP.priv) { PVP.cd = null; return; } return pvpQueueTick(dt); }
   if (!PVP.on || PVP.over) return;
   PVP.sendT -= dt;
   if (PVP.role === 'sec') {
@@ -5281,9 +5282,13 @@ function pvpHumanWatch() { // 인간 쪽: 감시 카메라 = 감시로봇이 나
 function pvpLobbyKey(id) {
   if (id === 'lang') return setLang(LANG === 'en' ? 'ko' : 'en');
   if (!PVP.stage) {
-    if (id === '1') pvpHost();
+    if (id === '1') { PVP.stage = 'secmenu'; audio.sfx('click'); return; }
     else if (id === '2') pvpQuick();
     else { PVP.stage = 'typing'; PVP.typed = ''; }
+    audio.sfx('scanDone'); return;
+  }
+  if (PVP.stage === 'secmenu') {
+    if (id === '1') pvpHost(0, false); else if (id === '2') pvpHost(0, true); else return audio.sfx('deny');
     audio.sfx('scanDone'); return;
   }
   if (PVP.stage === 'typing') {
@@ -5300,7 +5305,24 @@ function pvpDrawScreen(c, w, h, cursor) {
   c.fillStyle = info.accent; c.font = `900 32px ${FONT}`; c.fillText(info.title, 18, 44);
   const big = (s, y, col = green) => { c.fillStyle = col; c.font = `900 64px ${FONT}`; c.fillText(s, 18, y); };
   const small = (s, y, col = '#c8f0d8') => { c.fillStyle = col; c.font = `500 19px ${FONT}`; wrapText(c, s, w - 36).forEach((l, i) => c.fillText(l, 18, y + i * 25)); };
-  if (PVP.stage === 'hosting') {
+  if (PVP.stage === 'secmenu') {
+    small(TR('감시로봇으로 방 열기', 'Open a room as Security'), 92);
+    c.fillStyle = green; c.font = `800 26px ${FONT}`;
+    c.fillText(TR('[1] 공개 대기열', '[1] Public queue'), 18, 160);
+    small(TR('인간 대기열에서 아무나 들어와요. 15초 동안 새로 안 오면 자동 시작.', 'Anyone in the human queue can join. Auto-starts after 15s with no new joins.'), 196);
+    c.fillStyle = green; c.font = `800 26px ${FONT}`;
+    c.fillText(TR('[2] 비공개 방 (친구끼리)', '[2] Private room (friends)'), 18, 270);
+    small(TR('코드를 아는 사람만 들어와요. 내가 [1]을 눌러야 시작.', 'Only people with the code can join. Starts when you press [1].'), 306);
+    small(TR('ESC = 뒤로', 'ESC = back'), h - 50, '#5ab884');
+  } else if (PVP.stage === 'hosting' && PVP.priv) {
+    const n = PVP.players.size;
+    small(TR('비공개 방 · 친구들에게 코드를 알려 주세요', 'Private room · tell your friends the code'), 88);
+    c.fillStyle = PVP.ready ? '#7dffb0' : '#ffb02e'; c.font = `700 18px ${FONT}`; c.fillText(PVP.ready ? TR('● 접속 가능', '● Ready') : TR('○ 서버 접속 중...', '○ Connecting...'), 430, 88);
+    c.fillStyle = PVP.ready ? '#ffe14a' : '#4a6a5a'; c.font = `900 120px ${FONT}`; c.fillText(PVP.code.split('').join(' '), 18, 120);
+    small(TR(`참가한 인간: ${n} / ${PVP_MAX}명`, `Humans: ${n} / ${PVP_MAX}`) + (n ? '  ' + '●'.repeat(n) : ''), 262, n ? '#ffe14a' : '#c8f0d8');
+    small(TR('친구들: 파란 디스크 → [3] 코드로 참가', 'Friends: VERSUS disk → [3] Join by code'), 294);
+    c.fillStyle = n ? green : '#4a6a5a'; c.font = `800 20px ${FONT}`; c.fillText((n ? TR('[1] 시작 · ', '[1] Start · ') : '') + TR('ESC = 방 닫기', 'ESC = close room'), 18, h - 50);
+  } else if (PVP.stage === 'hosting') {
     const n = PVP.players.size, dots = '.'.repeat(1 + Math.floor(performance.now() / 333) % 3);
     small(TR('감시로봇 대기열', 'Security queue'), 88, '#c8f0d8');
     c.fillStyle = PVP.ready ? '#7dffb0' : '#ffb02e'; c.font = `700 18px ${FONT}`; c.fillText(PVP.ready ? TR('● 대기열 등록됨', '● In queue') : TR('○ 서버 접속 중...', '○ Connecting...'), 300, 88);
@@ -5316,7 +5338,7 @@ function pvpDrawScreen(c, w, h, cursor) {
     small(TR('나는 인간 역할로 들어가요.', 'You join as a Human.'), h - 70, '#5ab884');
   } else if (PVP.stage === 'connecting') {
     big(PVP.code.split('').join(' '), 150);
-    small((PVP.retry ? TR(`방 찾는 중 (${PVP.retry}/5)`, `Looking for room (${PVP.retry}/5)`) : TR('연결 중', 'Connecting')) + '.'.repeat(1 + Math.floor(performance.now() / 333) % 3), 250);
+    small((PVP.retry ? TR(`방 찾는 중 (${PVP.retry}/4)`, `Looking for room (${PVP.retry}/4)`) : TR('연결 중', 'Connecting')) + '.'.repeat(1 + Math.floor(performance.now() / 333) % 3), 250);
   } else if (PVP.stage === 'searching') {
     small(TR('인간 대기열', 'Human queue'), 88, '#c8f0d8');
     big(TR('방 찾는 중', 'SEARCHING'), 150);
