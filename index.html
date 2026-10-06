@@ -3513,7 +3513,7 @@ function hStartNight(i) { // i = -1: 튜토리얼(수습 잠입)
 }
 function hGoto(loc, instant = false) {
   const apply = () => {
-    if (H.walkCD < 2.9) H.stay = false; // 이벤트(DJ 호출 등)로 이동 → 춤 끝나면 자동 복귀
+    if (!H.walkGo) H.stay = false; H.walkGo = false; // 이벤트(DJ 호출 등)로 이동 → 춤 끝나면 자동 복귀
     H.loc = loc;
     const L = H_LOCS[loc];
     rig.rotation.y = L.yaw; yaw = 0; pitch = loc === 'bar' ? -0.12 : -0.05;
@@ -4431,7 +4431,7 @@ function hWalk() {
   const to = H.loc === 'bar' ? 'floor' : 'bar';
   const beat = audio.beat() ?? 0;
   if (to === 'bar' && H.rallyEnd > beat) hAddSus(10, TR('소집 중 이탈!', 'Left during rally!')); // 대결: 소집 춤 도중에 빠지면 수상
-  H.walkCD = 3; H.stay = to === 'floor';
+  H.walkCD = 3; H.stay = to === 'floor'; H.walkGo = true;
   audio.sfx('click');
   hGoto(to);
 }
@@ -4457,7 +4457,8 @@ function hWalkUpdate(dt) {
   if (!show) return;
   // 지금 자리 앞 오른쪽 아래 (손 닿는 거리)
   const L = H_LOCS[H.loc];
-  hWalkSign.mesh.position.copy(L.pos).addScaledVector(hFwd(L.yaw), 0.55).addScaledVector(hRight(L.yaw), 0.4); hWalkSign.mesh.position.y = 1.22;
+  const vrW = renderer.xr.isPresenting; // VR: 손 닿는 곳 / PC: 화면 오른쪽 아래에 보이게
+  hWalkSign.mesh.position.copy(L.pos).addScaledVector(hFwd(L.yaw), vrW ? 0.55 : 0.8).addScaledVector(hRight(L.yaw), vrW ? 0.4 : 0.42); hWalkSign.mesh.position.y = vrW ? 1.22 : 1.42;
   camera.getWorldPosition(_hp); hWalkSign.mesh.lookAt(_hp);
   drawWalkSign();
   // VR: A/X 버튼, 손가락으로 표지판 톡
