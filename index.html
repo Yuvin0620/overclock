@@ -3526,11 +3526,12 @@ function hGoto(loc, instant = false) {
   H.moving = true; G.fadeTo = 1;
   setTimeout(() => { apply(); G.fadeTo = 0; H.moving = false; }, 450); // 짧은 암전 순간이동
 }
+const H_EYE = 1.65; // 인간 모드 VR 눈높이 (로봇 손님들과 눈이 맞는 높이)
 function hRecenter() {
   const L = H_LOCS[H.loc];
   if (renderer.xr.isPresenting) {
-    const p = headLocal().applyAxisAngle(new THREE.Vector3(0, 1, 0), L.yaw);
-    rig.position.set(L.pos.x - p.x, 0, L.pos.z - p.z);
+    const h = headLocal(), p = h.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), L.yaw);
+    rig.position.set(L.pos.x - p.x, H_EYE - h.y, L.pos.z - p.z); // 눈높이를 항상 1.65m로 (앉아서 해도, 기기가 바닥을 몰라도)
   } else rig.position.set(L.pos.x, 0, L.pos.z);
 }
 function hNightEnd() {
@@ -4812,7 +4813,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1006-h5', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1006-h7', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
@@ -4901,7 +4902,7 @@ function lobbyClick() {
 }
 // ── VR(AR) 집기 ──
 function lobbyGrab(c) {
-  if (LOBBY.starting) return false;
+  if (LOBBY.starting || c.userData.lobbyHeld) return false;
   const gi = grabInfo(c); if (!gi) return false;
   const d = LOBBY.discs.find((x) => !x.held && x.g.getWorldPosition(new THREE.Vector3()).distanceTo(gi.point) < 0.12);
   if (!d) return false;
@@ -4951,6 +4952,11 @@ function lobbyUpdate(dt, t) {
   for (const d of LOBBY.discs) {
     const g = d.g;
     if (d.held) {
+      const owner = controllers.find((c) => c.userData.lobbyHeld === d);
+      const gp = owner?.userData.input?.gamepad;
+      const pressing = owner && (owner.userData.isHand ? true : (gp?.buttons?.[0]?.value || 0) > 0.25 || (gp?.buttons?.[1]?.value || 0) > 0.25);
+      if (!owner) { d.held = null; d.anim = { t: 0, from: g.position.clone(), fromQ: g.quaternion.clone(), insert: false }; continue; } // 주인 없는 디스크 → 제자리로
+      if (!pressing) { lobbyRelease(owner.userData); continue; } // 트리거·그립 다 놓았으면 놓기
       _lm.multiplyMatrices(d.held.anchor.matrixWorld, d.offset); _lm.decompose(g.position, g.quaternion, _ls);
       if (g.position.distanceTo(SLOT) < 0.09 && !d.nearSlot) { d.nearSlot = true; for (const c of controllers) if (c.userData.lobbyHeld === d) haptic(c, 0.3, 20); }
       else if (g.position.distanceTo(SLOT) >= 0.09) d.nearSlot = false;
