@@ -3044,7 +3044,7 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('selectstart', () => {
     if (G.state === 'end') { if (G.endT <= 0) location.reload(); return; }
     if (LOBBY.active) { lobbyGrab(c); return; }
-    if (H.active) { if (hTryGrabDrink(c)) return; humanHit(); return; }
+    if (H.active) { if (hRayChoose(c) || hTryGrabDrink(c)) return; if (H.enc?.kind === 'choice' && renderer.xr.isPresenting) return; humanHit(); return; }
     const u = c.userData;
     if (u.isHand && tryGrab(c)) return; // 손: 핀치로 집기
     u.hold = u.ptr?.monitor ? { mon: u.ptr.monitor, t: 0 } : null;
@@ -3633,7 +3633,7 @@ function hMotion(dt) {
 }
 
 // ── 조우 이벤트: 로봇이 말을 걸어온다. 로봇답게 대응해야 함 ─────────────
-// 선택지: VR = 왼손/오른손 들기 · PC = 1/2 키 또는 화면 왼쪽/오른쪽 클릭
+// 선택지: VR = 레이로 가리키고 트리거(맨손: 핀치) · PC = 1/2 키 또는 화면 왼쪽/오른쪽 클릭
 // r: 로봇다운 대답, h: 인간다운 대답(들킴), rr/hr: 로봇의 반응
 const ENC_TALK = [
   { who: TR('애매하게 잘생긴 로봇', 'Vaguely handsome robot'), q: TR('삐빅. 너 외장 광택 미쳤다. 내 충전 포트에 꽂아 볼래?', 'Beep. Your chassis is SHINY. Wanna plug into my charging port?'),
@@ -3957,8 +3957,7 @@ function hEncUpdate(dt, t) {
   if (e.p && !e.p.alive && e.kind !== 'act') { H.enc = null; H.grace = Math.floor(audio.beat() ?? 0) + 3; return; }
   if (e.kind === 'choice') {
     e.t -= dt;
-    const r = hRaised();
-    for (const i of [0, 1]) { e.raise[i] = r[i] ? e.raise[i] + dt : 0; if (e.raise[i] > 0.35) return hEncChoose(i); }
+    // 선택: VR = 레이 + 트리거 (hRayChoose) · PC = 1/2 키 · 화면 왼쪽/오른쪽 클릭
     if (e.t <= 0) { audio.sfx('deny'); hEncFinish(e.timeout ?? 12, EL.timeout, TR('무응답', 'No answer')); }
   } else if (e.kind === 'act') {
     e.t -= dt;
@@ -4219,6 +4218,7 @@ function updateHuman(dt, t) {
   hVrUi(dt, t);
   hWalkUpdate(dt);
   hAlerts(dt);
+  hArmDance(dt);
   hVig.mesh.visible = !H.ending;
   { // 테두리 판을 실제 시야 크기에 맞춤 (VR은 시야가 넓어서 넉넉히)
     const hh = renderer.xr.isPresenting ? 0.36 : 0.3 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -4357,6 +4357,29 @@ function hLeftHand() { // 왼손: 맨손이면 손목 관절, 컨트롤러면 �
 }
 
 // 선택지 카드 (왼손 위 = 1번, 오른손 위 = 2번)
+const _rq = new THREE.Raycaster(), _rm = new THREE.Matrix4();
+function hRayPick(c) { // 컨트롤러 레이가 가리키는 선택지 카드 번호 (없으면 -1)
+  if (!c.userData.input) return { i: -1 };
+  _rm.identity().extractRotation(c.matrixWorld);
+  _rq.ray.origin.setFromMatrixPosition(c.matrixWorld); _rq.ray.direction.set(0, 0, -1).applyMatrix4(_rm);
+  const hit = _rq.intersectObjects(hCards.map((cd) => cd.mesh), false)[0];
+  return { i: hit ? hCards.findIndex((cd) => cd.mesh === hit.object) : -1, d: hit?.distance ?? 1.2 };
+}
+function hRayHover() { // 레이 보이기 + 가리키는 카드 강조
+  H.cardHover = -1;
+  for (const c of controllers) {
+    const u = c.userData; if (!u.input) continue;
+    const p = hRayPick(c);
+    u.line.visible = true; u.line.scale.z = p.d;
+    if (p.i >= 0) { H.cardHover = p.i; if (u.lastHover !== p.i) haptic(c, 0.3, 25); }
+    u.lastHover = p.i;
+  }
+}
+function hRayChoose(c) { // 트리거/핀치: 가리킨 카드 선택
+  if (H.enc?.kind !== 'choice' || !renderer.xr.isPresenting) return false;
+  const p = hRayPick(c); if (p.i < 0) return false;
+  haptic(c, 0.7, 60); hEncChoose(p.i); return true;
+}
 const hCards = [0, 1].map(() => {
   const p = new CanvasPanel(0.24, 0.12, 512, 256, { transparent: true, depthTest: false });
   p.mesh.renderOrder = 60; p.mesh.visible = false; p.key = '';
@@ -4364,7 +4387,7 @@ const hCards = [0, 1].map(() => {
   return p;
 });
 function drawCard(p, i, e) {
-  const prog = Math.min(1, e.raise[i] / 0.35), key = `${e.opts[i].t}|${(prog * 10) | 0}|${(e.t * 4) | 0}`;
+  const prog = H.cardHover === i ? 1 : 0, key = `${e.opts[i].t}|${prog}|${(e.t * 4) | 0}|${LANG}`;
   if (key === p.key) return; p.key = key;
   const { ctx: c, w, h } = p, sel = prog > 0;
   c.clearRect(0, 0, w, h);
@@ -4375,7 +4398,7 @@ function drawCard(p, i, e) {
   const lines = wrapText(c, e.opts[i].t, w - 50).slice(0, 3);
   lines.forEach((l, k) => c.fillText(l, w / 2, 100 - (lines.length - 1) * 21 + k * 42));
   c.fillStyle = '#ffd0d8'; c.font = `800 24px ${FONT}`;
-  c.fillText(i ? TR('오른손을 위로 ↑', 'Raise RIGHT hand ↑') : TR('↑ 왼손을 위로', '↑ Raise LEFT hand'), w / 2, h - 50);
+  c.fillText(TR('가리키고 트리거 (맨손: 핀치)', 'Point & pull trigger (hand: pinch)'), w / 2, h - 50);
   c.fillStyle = 'rgba(0,0,0,.5)'; c.fillRect(30, h - 24, w - 60, 6);
   c.fillStyle = sel ? '#7dffb0' : '#ffb02e'; c.fillRect(30, h - 24, (w - 60) * (sel ? prog : Math.max(0, e.t / e.T)), 6);
   p.commit();
@@ -4399,15 +4422,18 @@ function hVrUi(dt, t) {
   // 손 위 선택지 카드
   const e = H.enc, show = vr && live && e?.kind === 'choice';
   for (const cd of hCards) cd.mesh.visible = false;
+  for (const c of controllers) if (!show) c.userData.line.visible = false;
   if (show) {
     camera.getWorldPosition(_hp);
-    for (const c of controllers) {
-      const u = c.userData; if (!u.input) continue;
-      const i = u.input.handedness === 'left' ? 0 : 1, cd = hCards[i];
-      const src = u.isHand ? u.hand.joints?.wrist : c; if (!src) continue;
-      src.getWorldPosition(cd.mesh.position); cd.mesh.position.y += 0.17;
-      cd.mesh.lookAt(_hp); cd.mesh.visible = true; drawCard(cd, i, e);
+    // 두 카드를 내 앞 1m, 눈보다 조금 아래에 나란히 → 컨트롤러 레이로 가리키고 트리거(맨손: 핀치)
+    const L = H_LOCS[H.loc];
+    for (const i of [0, 1]) {
+      const cd = hCards[i];
+      cd.mesh.position.copy(L.pos).addScaledVector(hFwd(L.yaw), 1.0).addScaledVector(hRight(L.yaw), i ? 0.14 : -0.14); cd.mesh.position.y = _hp.y - 0.18;
+      cd.mesh.lookAt(_hp); cd.mesh.visible = true; cd.mesh.updateMatrixWorld();
     }
+    hRayHover();
+    for (const i of [0, 1]) drawCard(hCards[i], i, e);
   }
   // 로봇 눈 색: 근처 로봇일수록, 의심이 높을수록 노랑 → 빨강
   const pos = hPos();
@@ -4460,6 +4486,23 @@ function drawWalkSign() {
   hWalkSign.commit();
 }
 const _ws = new THREE.Vector3(), _wt = new THREE.Vector3();
+function hArmDance(dt) { // VR 플로어: 손을 아래로 휙 내리면 = 박자 한 번 (트리거도 그대로 됨)
+  H.armCD = Math.max(0, (H.armCD || 0) - dt);
+  if (!renderer.xr.isPresenting || !H.dancing || H.ending || H.moving || dt <= 0) return;
+  for (const c of controllers) {
+    const u = c.userData; if (!u.input) continue;
+    const src = u.isHand ? u.hand.joints?.wrist : c; if (!src) continue;
+    src.getWorldPosition(_cp);
+    if (u.armY == null) { u.armY = _cp.y; continue; }
+    const vy = (_cp.y - u.armY) / dt; u.armY = _cp.y;
+    u.armV = (u.armV ?? 0) * 0.5 + vy * 0.5; // 살짝 부드럽게
+    if (u.armV > -0.3) u.armReady = true;           // 올리거나 멈춤 → 다음 내려치기 준비
+    if (u.armReady && u.armV < -1.1 && H.armCD <= 0) { // 휙 내려침
+      u.armReady = false; H.armCD = 0.22;               // 두 손 동시에 내려도 한 번만
+      haptic(c, 0.4, 30); humanHit();
+    }
+  }
+}
 function hWalkUpdate(dt) {
   H.walkCD = Math.max(0, (H.walkCD || 0) - dt);
   const show = H.active && !H.ending && !H.between && !H.tutorial;
@@ -4624,7 +4667,7 @@ function drawHumanHud(beat, t) {
   if (e && e.kind !== 'battle' && e.q && !(vr && e.p)) { c.font = SUB_FONT(26); lines = [{ t: e.who, sp: true }, ...wrapText(c, e.q, 690).slice(0, 3).map((t) => ({ t }))]; }
   else if (H.msgT > 0 && H.msg) { c.font = SUB_FONT(26); lines = wrapText(c, H.msg, 690).slice(0, 4).map((t) => ({ t })); }
   else if (H.night === 0 && H.t < 30) {
-    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 손 들기 = 대답·박수 · Meta 버튼 길게 = 위치 재설정', 'Hand to face = wipe/cover/drink · raise hand = answer/clap · hold Meta button = recenter')
+    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 대답 = 레이+트리거 · 손 들기 = 박수 · 플로어: 팔을 박자에 맞춰 내리기 · Meta 버튼 길게 = 위치 재설정', 'Hand to face = wipe/cover/drink · answer = ray+trigger · raise hand = clap · floor: swing arms down on the beat · hold Meta button = recenter')
       : TR('F 꾹 = 닦기·가리기·마시기 · 1/2 = 대답 · R = 박수 · Space = 박자 · 드래그 = 둘러보기', 'Hold F = wipe/cover/drink · 1/2 = answer · R = clap · Space = beat · drag = look'), dim: true }];
   }
   if (lines.length) {
@@ -4892,7 +4935,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1009-h9', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h10', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
