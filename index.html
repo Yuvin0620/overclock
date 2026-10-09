@@ -3590,7 +3590,7 @@ function humanHit() {
   const b = audio.beat(); if (b == null) return;
   if (hFrozen()) { H.freeze.moved = true; return hAddSus(12, TR('동결 중 움직임!', 'Moved during freeze!')); }
   if (!H.dancing) return; // 바에선 박자 없음 (PC: Space는 그냥 무시)
-  if (H.face > 0.2) return;
+  // 한 손은 얼굴(재채기·얼음·땀), 다른 손으론 계속 춤출 수 있음 → 얼굴에 손 대고 있어도 박자 입력 받음
   const n = Math.round(b), err = Math.abs(b - n) * 60 / (audio.liveBpm || 120);
   if (hGrace(n)) return;
   if (hRest(n)) return hAddSus(5, TR('쉬는 박인데 움직임', 'Moved on a rest'));
@@ -3610,8 +3610,9 @@ const _hp = new THREE.Vector3(), _cp = new THREE.Vector3();
 function hHandsAtFace() {
   if (!renderer.xr.isPresenting) return H.keyFace;
   camera.getWorldPosition(_hp);
-  for (const c of controllers) { if (!c.userData.input) continue; c.getWorldPosition(_cp); if (_cp.distanceTo(_hp) < 0.2) return true; }
-  return false;
+  let any = false;
+  for (const c of controllers) { const u = c.userData; u.atFace = false; if (!u.input) continue; c.getWorldPosition(_cp); if (_cp.distanceTo(_hp) < 0.2) { u.atFace = true; any = true; } }
+  return any;
 }
 function hRaised() { // [왼손, 오른손] 머리 위로 들었나
   const r = [false, false];
@@ -4491,6 +4492,7 @@ function hArmDance(dt) { // VR 플로어: 손을 아래로 휙 내리면 = 박�
   if (!renderer.xr.isPresenting || !H.dancing || H.ending || H.moving || dt <= 0) return;
   for (const c of controllers) {
     const u = c.userData; if (!u.input) continue;
+    if (u.atFace) { u.armY = null; u.armReady = false; continue; } // 얼굴에 댄 손은 춤 판정 안 함
     const src = u.isHand ? u.hand.joints?.wrist : c; if (!src) continue;
     src.getWorldPosition(_cp);
     if (u.armY == null) { u.armY = _cp.y; continue; }
@@ -4935,7 +4937,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1009-h10', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h11', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
