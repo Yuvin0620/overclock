@@ -2277,6 +2277,12 @@ renderer.xr.setReferenceSpaceType('local-floor');
 document.body.appendChild(renderer.domElement);
 // 퀘스트: AR(패스스루) 세션 하나로 메인 화면부터 게임까지. 게임 장면은 배경이 꽉 차서 완전한 가상 공간이 됨
 const vrButton = ARButton.createButton(renderer, { optionalFeatures: ['local-floor', 'hand-tracking'] });
+// 언어 전환은 페이지를 새로 불러옴 → 퀘스트 브라우저는 새로고침 뒤에도 AR을 이어 갈 수 있게 'sessiongranted'를 줌 (WebXR Navigation)
+if (navigator.xr?.addEventListener) navigator.xr.addEventListener('sessiongranted', () => {
+  if (renderer.xr.isPresenting) return;
+  navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local-floor', 'hand-tracking'] })
+    .then((ses) => renderer.xr.setSession(ses)).catch((e) => console.warn('[sessiongranted]', e));
+});
 document.body.appendChild(vrButton);
 // VR을 못 쓰는 환경(일반 PC 브라우저)에선 'VR NOT SUPPORTED' 버튼을 숨김
 // (three.js가 지원 여부를 확인한 뒤 버튼을 다시 보이게 하므로, 버튼 글자를 지켜보다가 숨김)
@@ -4577,6 +4583,10 @@ function drawHumanHud(beat, t) {
     hPill(c, gx + 70, gy + 14, 166 * Math.min(1, H.sweat / 100), 16, H.sweat > 70 ? '#4fb0ff' : '#2a6a9a');
     if (H.sweat > 60) hText(c, vr ? TR('얼굴에 손!', 'hand to face!') : TR('F 꾹', 'hold F'), gx + 256, gy + 22, `700 18px ${FONT}`, '#bfe9ff');
   }
+  if (vr) { // 높이 진단 (임시): 기기 머리 높이 · rig 높이 · 실제 눈높이
+    camera.getWorldPosition(_hp);
+    hText(c, `DBG pose ${camera.position.y.toFixed(2)} rig ${rig.position.y.toFixed(2)} eye ${_hp.y.toFixed(2)} ref ${renderer.xr.getReferenceSpace?.() ? (renderer.xr._refType || '') : ''}`, cx, 20, `700 22px ${FONT}`, '#ffb02e', 'center');
+  }
   hHud.commit();
 }
 function drawEncHud() { /* 자막/선택지 카드로 통합됨 */ }
@@ -4710,7 +4720,8 @@ function renderCCTV() {
 const LOBBY = { scene: new THREE.Scene(), active: true, discs: [], keys: [], inserted: null, starting: null, hoverT: 0, screen: null, hits: [] };
 const LOBBY_SPOT = new THREE.Vector3(0, 0, 0);          // 플레이어 자리
 const STAND_Y = 0.86, STAND_Z = -0.5;                     // 받침대 윗면 높이 · 위치
-const SLOT = new THREE.Vector3(-0.02, STAND_Y + 0.035, STAND_Z + 0.118); // 디스크 드라이브 입구
+const TOWER = new THREE.Vector3(0.28, STAND_Y, STAND_Z - 0.05); // 본체(타워) 바닥 가운데
+const SLOT = new THREE.Vector3(TOWER.x, STAND_Y + 0.215, TOWER.z + 0.115); // 디스크 드라이브 입구 (본체 앞면 위쪽)
 const LOBBY_BG = new THREE.Color(0x060608);
 const DISC_INFO = {
   oil: {
@@ -4748,17 +4759,27 @@ const DISC_INFO = {
   neon.position.set(0, 1.95, -2.8); s.add(neon); LOBBY.neon = neon;
   // 받침대
   const stand = new THREE.Group(); stand.position.set(0, 0, STAND_Z); s.add(stand);
-  const top = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.04, 0.5), flat(0x2a2c30, { metalness: 0.5, roughness: 0.5 })); top.position.y = STAND_Y - 0.02; stand.add(top);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.04, 0.5), flat(0x2a2c30, { metalness: 0.5, roughness: 0.5 })); top.position.y = STAND_Y - 0.02; stand.add(top);
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, STAND_Y - 0.04, 12), flat(0x1b1c20, { metalness: 0.6 })); pole.position.y = (STAND_Y - 0.04) / 2; stand.add(pole);
   const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.27, 0.03, 20), flat(0x1b1c20, { metalness: 0.6 })); foot.position.y = 0.015; stand.add(foot);
   LOBBY.legs = [pole, foot]; // AR에선 숨김: 테이블 높이를 내 눈높이에 맞추니까 바닥까지 닿지 않음
-  const neonEdge = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.006, 0.006), glow(0xff2a6d, 2)); neonEdge.position.set(0, STAND_Y - 0.035, 0.25); stand.add(neonEdge);
+  const neonEdge = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.006, 0.006), glow(0xff2a6d, 2)); neonEdge.position.set(0, STAND_Y - 0.035, 0.25); stand.add(neonEdge);
   // 레트로 컴퓨터: 본체(디스크 드라이브) + CRT 모니터
   const beige = flat(0xd8cfb8, { roughness: 0.7 }), beigeDark = flat(0xb8ae96, { roughness: 0.8 });
   const pc = new THREE.Group(); pc.position.set(-0.05, STAND_Y, STAND_Z - 0.02); s.add(pc);
   const base = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.07, 0.28), beige); base.position.y = 0.035; pc.add(base);
-  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.008, 0.01), flat(0x0a0a0a)); slot.position.set(SLOT.x + 0.05, 0.035, 0.141); pc.add(slot);
-  const led = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.006, 0.004), new THREE.MeshBasicMaterial({ color: 0x113311 })); led.position.set(0.13, 0.035, 0.141); pc.add(led); LOBBY.led = led;
+  // 본체(타워): 앞면 위쪽에 플로피 드라이브 · 아래엔 통풍구 · 전원 버튼 · LED
+  const tower = new THREE.Group(); tower.position.copy(TOWER); s.add(tower);
+  const tw = 0.15, th = 0.3, td = 0.23;
+  const tBody = new THREE.Mesh(new THREE.BoxGeometry(tw, th, td), beige); tBody.position.y = th / 2; tower.add(tBody);
+  const fz = td / 2 + 0.001; // 앞면
+  const bay = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.006), beigeDark); bay.position.set(0, 0.215, fz); tower.add(bay); // 드라이브 칸
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.009, 0.006), flat(0x0a0a0a)); slot.position.set(0, 0.215, fz + 0.003); tower.add(slot); // 디스크 넣는 구멍
+  const eject = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.008, 0.006), beige); eject.position.set(0.04, 0.2, fz + 0.003); tower.add(eject);
+  for (let i = 0; i < 4; i++) { const v = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.005, 0.004), flat(0x8a8270)); v.position.set(-0.005, 0.15 - i * 0.014, fz); tower.add(v); } // 통풍구
+  const power = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.006, 16), beigeDark); power.rotation.x = Math.PI / 2; power.position.set(0, 0.055, fz + 0.002); tower.add(power);
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.006, 0.004), new THREE.MeshBasicMaterial({ color: 0x113311 })); led.position.set(-0.045, 0.2, fz + 0.003); tower.add(led); LOBBY.led = led;
+  const cable = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.004, 6, 16, Math.PI), flat(0xb8ae96)); cable.position.set(-0.11, 0.06, -0.05); cable.rotation.set(0, Math.PI / 2, 0); tower.add(cable); // 모니터로 가는 선
   const mon = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.26, 0.26), beige); mon.position.set(0, 0.07 + 0.14, -0.02); pc.add(mon);
   const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.01), beigeDark); bezel.position.set(0, 0.21, 0.115); pc.add(bezel);
   LOBBY.screen = new CanvasPanel(0.25, 0.19, 640, 486);
@@ -4790,10 +4811,10 @@ const DISC_INFO = {
     }) }));
     label.rotation.x = -Math.PI / 2; label.position.set(0, 0.0025, 0.012); g.add(label);
     const hit = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.05, 0.13), new THREE.MeshBasicMaterial({ visible: false })); hit.userData.lobby = { type: 'disc', kind }; g.add(hit);
-    g.position.set(0.27, STAND_Y + 0.003, z); g.rotation.y = rotY; s.add(g);
+    g.position.set(-0.42, STAND_Y + 0.003, z); g.rotation.y = rotY; s.add(g);
     const d = { kind, g, home: g.position.clone(), homeQ: g.quaternion.clone(), held: null, anim: null }; LOBBY.discs.push(d); return d;
   };
-  mkDisc('oil', STAND_Z - 0.13, -0.12); mkDisc('cocktail', STAND_Z + 0.0, 0.1); mkDisc('pvp', STAND_Z + 0.13, -0.06);
+  mkDisc('oil', STAND_Z - 0.16, 0.12); mkDisc('cocktail', STAND_Z - 0.04, -0.08); mkDisc('pvp', STAND_Z + 0.08, 0.06);
   s.add(rig);
 })();
 
@@ -4813,7 +4834,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1006-h7', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1006-h8', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
@@ -4823,7 +4844,7 @@ function lobbyDrawScreen(t) {
   else if (!d) {
     c.fillStyle = green; c.font = `800 30px ${FONT}`; c.fillText(TR('디스크를 넣으세요', 'INSERT DISK') + cursor, 18, 150);
     c.fillStyle = '#5ab884'; c.font = `500 20px ${FONT}`;
-    wrapText(c, renderer.xr.isPresenting ? TR('옆에 놓인 디스크를 집어서 본체 앞쪽 드라이브 구멍에 가져다 대세요.', 'Grab a disk beside the computer and bring it to the drive slot on the front.') : TR('옆에 놓인 디스크를 클릭하면 드라이브에 들어갑니다.', 'Click a disk beside the computer to insert it.'), w - 36).forEach((l, i) => c.fillText(l, 18, 210 + i * 28));
+    wrapText(c, renderer.xr.isPresenting ? TR('왼쪽 디스크를 집어서 오른쪽 본체의 드라이브 구멍에 가져다 대세요.', 'Grab a disk on the left and bring it to the drive slot on the tower on the right.') : TR('왼쪽 디스크를 클릭하면 오른쪽 본체 드라이브에 들어갑니다.', 'Click a disk on the left to insert it into the tower on the right.'), w - 36).forEach((l, i) => c.fillText(l, 18, 210 + i * 28));
     c.fillStyle = '#ffd400'; c.fillText(TR('오일 = 감시 · 칵테일 = 인간 · 파랑 = 대결', 'OIL = Security · COCKTAIL = Human · BLUE = Versus'), 18, 300);
   } else if (d.kind === 'pvp' && PVP.stage) pvpDrawScreen(c, w, h, cursor);
   else {
@@ -4929,7 +4950,7 @@ function lobbyRecenter() {
     const hx = _lrc.x - rig.position.x, hy = _lrc.y - rig.position.y, hz = _lrc.z - rig.position.z;
     rig.position.set(LOBBY_SPOT.x - hx, STAND_Y + LOBBY_EYE_DROP - hy, LOBBY_SPOT.z - hz); // 테이블 윗면 = 눈보다 LOBBY_EYE_DROP 아래
   }
-  else rig.position.set(0.06, 0, STAND_Z + 0.9); // PC: 컴퓨터 · 키보드 · 디스크가 화면 가득
+  else rig.position.set(-0.04, 0, STAND_Z + 0.95); // PC: 컴퓨터 · 키보드 · 디스크가 화면 가득
 }
 function lobbyPcCam() { lobbyRecenter(); camera.position.set(0, 1.36, 0); camera.fov = 50; camera.updateProjectionMatrix(); yaw = 0; pitch = -0.3; }
 lobbyPcCam();

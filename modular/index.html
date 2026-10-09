@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLUB OVERCLOCK</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  canvas { display: block; }
+  /* 시작 화면: 뒤에 실제 3D 보안실이 보이고, 왼쪽은 어둡게 · 위아래는 레터박스 */
+  #overlay { position: fixed; inset: 0; z-index: 10; color: #d6e6ea; display: flex; align-items: center;
+    background:
+      linear-gradient(180deg, #000 0%, rgba(0,0,0,.92) 11%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 72%, rgba(0,0,0,.92) 88%, #000 100%),
+      linear-gradient(90deg, rgba(0,0,0,.94) 0%, rgba(0,0,0,.82) 26%, rgba(0,0,0,.25) 55%, rgba(0,0,0,.1) 100%); }
+  #overlay .menu { margin-left: clamp(24px, 8vw, 120px); width: min(440px, calc(100vw - 48px)); }
+  /* 클럽 안 네온 간판(OVERCLOCK)과 같은 글꼴·굵기·색·빛번짐 */
+  #overlay h1 { margin: 0; font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-weight: 900;
+    font-size: clamp(40px, 6vw, 68px); letter-spacing: 0; color: #ff5c8a; line-height: 1.05; text-shadow: 0 0 12px #ff2a6d, 0 0 30px #ff2a6d; }
+  #overlay .sub { margin: 14px 0 22px 4px; font-size: 13px; letter-spacing: .55em; color: #f3c9d4; text-transform: uppercase; }
+  #overlay .rule { height: 1px; background: linear-gradient(90deg, rgba(255,92,138,.8), rgba(255,92,138,.05)); margin-bottom: 18px; }
+  #overlay p { margin: 0 0 18px 4px; font-size: 13px; line-height: 1.7; color: #8fa4aa; }
+  #overlay p b { color: #c9dade; font-weight: 600; }
+  #overlay .items { display: flex; flex-direction: column; gap: 2px; margin-left: 4px; }
+  #overlay .item { position: relative; display: block; text-align: left; font: inherit; font-size: 16px; letter-spacing: .04em;
+    background: none; border: 0; color: #dfeaec; padding: 9px 0 9px 30px; cursor: pointer; transition: color .15s, transform .15s; }
+  #overlay .item small { display: block; font-size: 11px; color: #6f8489; letter-spacing: .02em; margin-top: 2px; }
+  /* 선택 표시: 게임 속 '감시 중' 표시처럼 깜빡이는 빨간 녹화등 */
+  #overlay .item::before { content: ''; position: absolute; left: 6px; top: 18px; width: 11px; height: 11px; border-radius: 50%;
+    background: #ff2a3a; box-shadow: 0 0 8px #ff2a3a, 0 0 18px rgba(255,42,58,.6); opacity: 0; transform: scale(.4); transition: opacity .15s, transform .15s; }
+  #overlay .item.sel { color: #ff5c8a; transform: translateX(4px); text-shadow: 0 0 14px rgba(255,42,109,.45); }
+  #overlay .item.sel::before { opacity: 1; transform: scale(1); animation: recBlink 1.1s steps(1) infinite; }
+  #overlay .item.sel small { color: #c2436a; }
+  /* 모드 제목(선택 불가) + 그 아래 작고 연한 하위 메뉴 */
+  #overlay .group { margin: 2px 0 6px; }
+  #overlay .item.ghead { font-size: 19px; color: #f1e6ea; padding: 7px 0 6px 30px; }
+  #overlay .item.ghead::after { content: ''; position: absolute; left: 6px; top: 17px; width: 7px; height: 7px; border-right: 2px solid #8a9ca0; border-bottom: 2px solid #8a9ca0; transform: rotate(-45deg); transition: transform .2s; }
+  #overlay .group.open > .ghead::after { transform: rotate(45deg); }
+  #overlay .item.ghead.sel::after { opacity: 0; }
+  #overlay .subs { max-height: 0; overflow: hidden; transition: max-height .28s ease; }
+  #overlay .group.open .subs { max-height: 220px; }
+  #overlay .ghead { font-size: 19px; letter-spacing: .04em; color: #f1e6ea; padding: 6px 0 4px 2px; transition: color .15s; }
+  #overlay .ghead small { display: block; font-size: 11px; color: #6f8489; margin-top: 2px; letter-spacing: .02em; }
+  #overlay .group.on .ghead { color: #ff8aa8; }
+  #overlay .item.subitem { font-size: 14px; color: #93a6ab; padding: 5px 0 5px 34px; }
+  #overlay .item.subitem::before { top: 10px; width: 9px; height: 9px; left: 14px; }
+  #overlay .item.subitem.sel { color: #ff5c8a; }
+  #overlay .item.locked { color: #4c5a5e; cursor: default; }
+  #overlay .item.locked small { display: inline; margin-left: 8px; font-size: 11px; color: #4c5a5e; }
+  #overlay.flash::after { content: ''; position: absolute; inset: 0; background: #000; opacity: 0; animation: bgFlash .35s ease-out; pointer-events: none; z-index: -1; }
+  @keyframes bgFlash { from { opacity: .85; } to { opacity: 0; } }
+  @keyframes recBlink { 50% { opacity: .25; } }
+  #overlay .file input { display: none; }
+  #langrow { position: fixed; top: 22px; right: 26px; display: flex; gap: 4px; z-index: 11; pointer-events: auto; }
+  #overlay { pointer-events: none; } /* 메인 화면 클릭은 뒤의 3D 지하로 */
+  #langrow button { font: inherit; font-size: 12px; letter-spacing: .1em; background: none; border: 0; color: #6f8489; padding: 6px 10px; cursor: pointer; }
+  #langrow button.on { color: #ff5c8a; }
+  #tracklist { font-size: 12px; color: #d88aa2; min-height: 16px; white-space: pre-line; margin: 10px 0 0 34px; }
+  #overlay .keys { position: fixed; left: clamp(24px, 8vw, 120px); bottom: 22px; font-size: 11px; color: #56686c; line-height: 1.7; max-width: min(760px, calc(100vw - 48px)); }
+  #overlay .keys b { color: #8aa0a6; font-weight: 600; }
+  #help { position: fixed; left: 12px; bottom: 12px; color: #4f8a69; font-size: 12px; z-index: 5; pointer-events: none; display: none; }
+/* 예전 HTML 메인 메뉴: 3D 메인 화면으로 대체 → 처음부터 숨김 (로딩 중 깜빡임 방지) */
+#overlay h1, #overlay .sub, #overlay .rule, #overlay p, #overlay .items { display: none !important; }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div id="langrow"><button data-lang="ko">한국어</button><button data-lang="en">English</button></div>
+  <div class="menu">
+    <h1>OVERCLOCK</h1>
+    <div class="sub">Robots-only club · 2087</div>
+    <div class="rule"></div>
+    <p>로봇이 인류를 '안전하고 건전하게' 보호하는 시대.<br>당신은 로봇 전용 클럽 <b>오버클럭</b>의 사장입니다.</p>
+    <nav class="items">
+      <div class="group" data-mode="sec">
+        <button class="item ghead" data-mode="sec">감시 모드<small>보안실 · CCTV로 숨어든 인간 찾기</small></button>
+        <div class="subs">
+          <button id="secTut" class="item subitem" data-mode="sec">튜토리얼</button>
+          <button id="start" class="item subitem" data-mode="sec">플레이</button>
+          <button id="hard" class="item subitem" data-mode="sec">하드 모드</button>
+        </div>
+      </div>
+      <div class="group" data-mode="human">
+        <button class="item ghead" data-mode="human">인간 모드<small>은박지로 위장하고 클럽에 잠입하기</small></button>
+        <div class="subs">
+          <button id="humanTutBtn" class="item subitem" data-mode="human">튜토리얼</button>
+          <button id="humanBtn" class="item subitem" data-mode="human">플레이</button>
+        </div>
+      </div>
+      <div class="group" data-mode="etc">
+        <button class="item ghead" data-mode="etc">기타<small>음악 · 기록</small></button>
+        <div class="subs">
+          <label class="file item subitem" data-mode="etc">내 곡 추가<small>음악 파일 넣기 (BPM 120 가정)</small><input type="file" id="files" accept="audio/*" multiple></label>
+          <button id="resetTut" class="item subitem" data-mode="etc">튜토리얼 다시 보기<small>완료 기록을 지우고 튜토리얼 메뉴를 다시 표시</small></button>
+        </div>
+      </div>
+    </nav>
+    <div id="tracklist"></div>
+  </div>
+  <div class="keys">
+    <b>↑ ↓</b> 선택 · <b>Enter</b> 결정 · <b>L</b> 언어 &nbsp;|&nbsp; VR: 아래 <b>ENTER VR</b> → 보안실 대기 화면에서 초록 버튼 = 근무 시작, 노란 레버 = 인간 모드<br>
+    보안실: 드래그 둘러보기 · 클릭 선택 · <b>S</b> 스캔 · <b>E</b> 귀가 조치 · <b>D</b> DJ 교체 · 모니터 우클릭 확대 &nbsp;|&nbsp; 인간 모드: <b>Space</b> 박자 · <b>F</b> 얼굴에 손 · <b>1/2</b> 대답 · <b>R</b> 손 들기
+  </div>
+</div>
+<div id="help">드래그: 둘러보기 · 클릭: 선택 · 우클릭: 모니터 당기기 · 휠: 줌 · S 스캔 · E 귀가조치 · D DJ교체 · Space 확인 · P PSX · L 언어</div>
+<script src="dist/models.js"></script>
+<script src="dist/game.js"></script>
+</body>
+</html>
