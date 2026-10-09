@@ -4003,24 +4003,28 @@ const TUT_WHO = TR('이어폰 속 학원 강사', 'Earpiece instructor');
 const hTutSay = (pc, vr) => hSay(`${TUT_WHO}: ${renderer.xr.isPresenting && vr ? vr : pc}`, 999);
 const _ty = new THREE.Vector3();
 function hCamYaw() { camera.getWorldDirection(_ty); return Math.atan2(-_ty.x, -_ty.z); }
+const vrT = () => renderer.xr.isPresenting;
 const H_TUT_STEPS = [
   { // 0 인사
-    enter() { hTutSay(TR('잘 들려요? 박자 학원 강사예요. 오늘은 수습 잠입이에요. 연습이니까 실수해도 안 걸려요. 하나씩 해 봐요.', 'Can you hear me? Beat Academy instructor here. Today is a practice infiltration — mistakes won\'t get you caught. One step at a time.')); },
+    enter() { HT.allowWalk = false;
+      hTutSay(TR('잘 들려요? 박자 학원 강사예요. 오늘은 수습 잠입이에요. 연습이니까 실수해도 안 걸려요. 하나씩 해 봐요.', 'Can you hear me? Beat Academy instructor here. Today is a practice infiltration — mistakes won\'t get you caught. One step at a time.'),
+        TR('잘 들려요? 박자 학원 강사예요. 오늘은 수습 잠입, 연습이라 실수해도 안 걸려요. 위치가 어색하면 Meta 버튼을 길게 눌러 다시 맞춰요.', 'Can you hear me? Beat Academy instructor. Practice infiltration — mistakes won\'t get you caught. If your position feels off, hold the Meta button to recenter.')); },
     update() { return HT.t > 6; } },
   { // 1 둘러보기
     enter() { HT.yawAcc = 0; HT.lastYaw = hCamYaw();
       hTutSay(TR('먼저 주변을 둘러봐요. 마우스로 드래그해서 뒤까지 한 바퀴! 뒤쪽엔 댄스플로어가 있어요.', 'First, look around. Drag with the mouse — all the way behind you! The dance floor is back there.'),
         TR('먼저 고개를 돌려 주변을 둘러봐요. 뒤쪽엔 댄스플로어가 있어요.', 'First, turn your head and look around. The dance floor is behind you.')); },
     update() { const y = hCamYaw(); let d = y - HT.lastYaw; d = Math.atan2(Math.sin(d), Math.cos(d)); HT.yawAcc += Math.abs(d); HT.lastYaw = y;
-      return HT.yawAcc > (renderer.xr.isPresenting ? 1.6 : 2.6) || HT.t > 20; } },
-  { // 2 게이지 · 감시
-    enter() { H.watch = true; H.sus = 35;
-      hTutSay(TR('맨 위 게이지가 「의심」이에요. 100이 되면 발밑 바닥이 열려요. 화면 테두리가 빨개지면 천장 카메라가 보고 있다는 뜻 — 그땐 실수가 두 배로 들켜요.', 'The top gauge is SUSPICION. At 100, the floor opens under you. When the screen edge turns red, the ceiling camera is watching — mistakes count double.')); },
-    update() { if (HT.t > 8) { H.watch = false; return true; } } },
+      return HT.yawAcc > (vrT() ? 1.6 : 2.6) || HT.t > 20; } },
+  { // 2 체력 · 의심 · 감시
+    enter() { H.sus = 35;
+      hTutSay(TR('맨 위 하트가 체력, 게이지가 「의심」이에요. 의심이 100이 되면 발밑 바닥이 열려요. 테두리가 빨개지고 「위이잉」 소리가 나면 천장 카메라가 보는 중 — 그땐 실수가 두 배로 들켜요.', 'Top hearts are HP, the gauge is SUSPICION. At 100 the floor opens under you. When the edge turns red with a "whirr", the ceiling camera is watching — mistakes count double.'),
+        TR('왼손목을 돌려 시계를 봐요. 하트가 체력, 큰 숫자가 「의심」%예요. 100이 되면 바닥이 열려요. 「위이잉」 소리와 진동이 오면 카메라가 보는 중 — 그땐 실수가 두 배. 의심이 높으면 주변 로봇 눈도 노랗게, 빨갛게 변해요.', 'Turn your left wrist and look at the watch. Hearts = HP, the big number = SUSPICION %. At 100 the floor opens. A "whirr" plus vibration means the camera is watching — mistakes count double. Nearby robot eyes turn yellow, then red, as suspicion rises.')); },
+    update() { if (HT.t > 3 && HT.t < 9) H.watch = true; if (HT.t >= 9) { H.watch = false; return true; } } },
   { // 3 대답 고르기
     enter() { HT.ok = null; HT.wait = 0;
       hTutSay(TR('로봇이 말을 걸면 「로봇다운」 대답을 골라요. 1/2 키, 또는 화면 왼쪽/오른쪽 클릭.', 'When a robot talks to you, pick the ROBOTIC answer. Keys 1/2, or click the left/right side.'),
-        TR('로봇이 말을 걸면 「로봇다운」 대답을 골라요. 고를 쪽 손(왼손/오른손)을 머리 위로 들면 돼요.', 'When a robot talks to you, pick the ROBOTIC answer. Raise the matching hand (left/right) above your head.')); },
+        TR('로봇이 말을 걸면 질문은 그 로봇 머리 위에, 대답 카드 두 장은 눈앞에 떠요. 「로봇다운」 카드를 레이로 가리키고 트리거(맨손: 핀치)!', 'When a robot talks to you, its question floats above its head and two answer cards appear in front of you. Point the ray at the ROBOTIC one and pull the trigger (hand: pinch)!')); },
     update() {
       if (HT.ok === null && !H.enc && HT.t > 4 && HT.wait === 0) {
         const p = hNear(); const d = ENC_TALK[1]; HT.wait = 1;
@@ -4031,36 +4035,43 @@ const H_TUT_STEPS = [
       return HT.ok === true && !H.enc && HT.t - HT.okT > 2.5; } },
   { // 4 땀
     enter() { H.sweat = 75; H.wipedOnce = false; H.tutSweat = true;
-      hTutSay(TR('땀이 차오르죠? 땀 게이지가 꽉 차면 들켜요. F 키를 꾹 눌러서 닦아요.', 'Feel the sweat? If the sweat gauge fills, you\'re busted. Hold F to wipe it.'),
-        TR('땀이 차오르죠? 땀 게이지가 꽉 차면 들켜요. 손을 이마(얼굴)에 대고 잠깐 유지해서 닦아요.', 'Feel the sweat? If the sweat gauge fills, you\'re busted. Hold a hand to your forehead (face) to wipe it.')); },
+      hTutSay(TR('땀이 차오르죠? 왼쪽 아래 땀 게이지가 꽉 차면 들켜요. F 키를 꾹 눌러서 닦아요.', 'Feel the sweat? If the sweat gauge (bottom left) fills, you\'re busted. Hold F to wipe it.'),
+        TR('땀이 차오르죠? 화면 가장자리가 파래지고, 시계 아래 파란 줄이 땀이에요. 손을 이마(얼굴)에 대고 잠깐 유지해서 닦아요.', 'Feel the sweat? The view edges turn blue, and the blue bar on your watch is sweat. Hold a hand to your forehead (face) to wipe it.')); },
     update() { return H.sweat < 10 && HT.t > 1; } },
   { // 5 재채기
     enter() { HT.ok = null; H.tutSneeze = true;
       hTutSay(TR('코가 간질간질... 재채기가 나오면 얼굴을 가려서 참아요. 카운트가 끝날 때 F를 누르고 있어야 해요.', 'Nose itching... When a sneeze comes, cover your face. Keep holding F when the countdown ends.'),
-        TR('코가 간질간질... 재채기가 나오면 손으로 얼굴을 가려서 참아요. 카운트가 끝날 때 손이 얼굴에 있어야 해요.', 'Nose itching... When a sneeze comes, cover your face with your hand. Keep it there when the countdown ends.')); },
+        TR('코가 간질간질... 재채기가 오면 눈앞에 주황 카드가 떠요. 카운트가 끝날 때까지 한 손으로 얼굴을 가려요. 얼음찜질(정전)도 같은 방법이에요.', 'Nose itching... When a sneeze comes, an orange card appears in front of you. Cover your face with one hand until the countdown ends. Ice packs during blackouts work the same way.')); },
     update() {
       if (HT.t > 3 && !H.sneeze && HT.ok === null) { H.sneeze = { t: 5 }; HT.ok = 'wait'; audio.sfx('tick'); }
       if (HT.ok === 'wait' && !H.sneeze) { if (H.sneezeOk) return true; HT.ok = null; HT.t = 0; hTutSay(TR('에취! 클럽이 조용해졌어요... 연습이니 다시 해 봐요. 얼굴을 끝까지 가려요.', 'ACHOO! The club went quiet... It\'s practice, try again. Keep your face covered.')); }
     } },
   { // 6 오일
     enter() { HT.ok = null; HT.hp0 = H.hp; H.sus = 45;
-      hTutSay(TR('의심은 저절로 안 줄어요. 줄이는 방법은 딱 하나, 바텐더가 주는 오일을 마시는 것. 대신 체력이 하나 깎여요 — 하룻밤에 3캔째면 쓰러져요. 캔을 클릭해서 마셔 봐요.', 'Suspicion never drops on its own. The only way down: drink the oil the bartender gives you. It costs 1 HP — the third can in one night knocks you out. Click the can to drink.'),
-        TR('의심은 저절로 안 줄어요. 줄이는 방법은 딱 하나, 바텐더가 주는 오일을 마시는 것. 대신 체력이 하나 깎여요 — 하룻밤에 3캔째면 쓰러져요. 캔을 잡아서 입에 대고 기울여요.', 'Suspicion never drops on its own. The only way down: drink the oil the bartender gives you. It costs 1 HP — the third can in one night knocks you out. Grab the can, tilt it to your mouth.')); },
+      hTutSay(TR('의심은 저절로 안 줄어요. 줄이는 방법은 바텐더가 주는 오일을 마시는 것. 대신 체력이 하나 깎여요 — 하룻밤에 3캔째면 쓰러져요. 캔을 클릭해서 마셔 봐요.', 'Suspicion never drops on its own. The way down: drink the bartender\'s oil. It costs 1 HP — the third can in one night knocks you out. Click the can to drink.'),
+        TR('의심은 저절로 안 줄어요. 줄이는 방법은 바텐더가 주는 오일을 마시는 것. 대신 체력이 하나 깎여요 — 하룻밤에 3캔째면 쓰러져요. 캔을 그립(핀치)으로 잡아 입에 대고 기울여요.', 'Suspicion never drops on its own. The way down: drink the bartender\'s oil. It costs 1 HP — the third can in one night knocks you out. Grab the can (grip/pinch), bring it to your mouth and tilt.')); },
     update() {
       if (HT.t > 5 && HT.ok === null && !H.enc) { HT.ok = 'wait'; HE.drinkOil(); }
       if (HT.ok === 'wait' && !H.enc) { if (H.hp < HT.hp0) return true; HT.ok = null; HT.t = 3; }
     } },
-  { // 7 플로어 · 박자
-    enter() { HT.hits = 0; HT.ok = null;
-      hTutSay(TR('DJ가 「다들 플로어로!」 하면 나가야 해요. 가서 박자에 맞춰 Space(또는 클릭)! 회색 「쉼」 박에선 가만히. 6번 맞춰 봐요.', 'When the DJ calls everyone to the floor, go. Then hit Space (or click) on the beat! Stay still on grey "rest" beats. Land 6 hits.'),
-        TR('DJ가 「다들 플로어로!」 하면 나가야 해요. 가서 박자에 맞춰 트리거(핀치)! 회색 「쉼」 박에선 가만히. 6번 맞춰 봐요.', 'When the DJ calls everyone to the floor, go. Then pull the trigger (pinch) on the beat! Stay still on grey "rest" beats. Land 6 hits.')); },
+  { // 7 직접 이동 → 플로어
+    enter() { HT.allowWalk = true; H.walkCD = 0;
+      hTutSay(TR('이제 직접 움직여 봐요. 오른쪽 아래 「댄스플로어로 ▶」 표지판을 클릭하거나 M 키!', 'Now move on your own. Click the "TO DANCE FLOOR ▶" sign at the bottom right, or press M!'),
+        TR('이제 직접 움직여 봐요. 오른쪽 앞 「댄스플로어로 ▶」 표지판을 검지로 톡, 또는 A/X 버튼!', 'Now move on your own. Tap the "TO DANCE FLOOR ▶" sign with your index finger, or press A/X!')); },
+    update() { return H.loc === 'floor' && !H.moving && HT.t > 0.5; } },
+  { // 8 춤
+    enter() { HT.hits = 0; HT.allowWalk = false;
+      hTutSay(TR('박자에 맞춰 Space(또는 클릭)! 아래 리듬 줄의 노란 원에 분홍 점이 겹칠 때예요. 회색 「쉼」 박에선 가만히. 6번 맞춰 봐요.', 'Hit Space (or click) on the beat — when a pink dot reaches the yellow circle on the rhythm line. Stay still on grey "rest" beats. Land 6 hits.'),
+        TR('몸 앞에 공이 떠요. 분홍은 왼손, 하늘은 오른손. 바깥 링이 줄어들어 공에 닿을 때 그 손을 공에 갖다 대요. 6번 맞춰 봐요.', 'Orbs appear in front of you. Pink = left hand, cyan = right hand. When the outer ring shrinks onto the orb, touch it with that hand. Land 6 hits.')); },
     update() {
-      if (HT.t > 4 && HT.ok === null) { HT.ok = 'floor'; hGoto('floor'); }
       if (H.dancing && H.danceEnd > 0 && H.danceEnd < 1e8) H.danceEnd = 1e9; // 다 맞출 때까지 계속
-      if (HT.ok === 'floor' && HT.hits >= 6) { HT.ok = 'back'; H.danceEnd = 0; H.dancing = false; hGoto('bar'); HT.t = 0; }
-      return HT.ok === 'back' && HT.t > 1.2;
-    } },
-  { // 8 박수
+      return HT.hits >= 6; } },
+  { // 9 바로 돌아가기 (DJ 호출 안내 포함)
+    enter() { HT.allowWalk = true; H.walkCD = 0;
+      hTutSay(TR('잘했어요! DJ가 「다들 플로어로!」 하면 자동으로 끌려 나오기도 해요. 이제 「◀ 바로」 표지판이나 M 키로 돌아가요.', 'Nice! Sometimes the DJ calls everyone to the floor and you get pulled out automatically. Now head back with the "◀ TO THE BAR" sign or M.'),
+        TR('잘했어요! DJ가 「다들 플로어로!」 하면 자동으로 끌려 나오기도 해요. 이제 「◀ 바로」 표지판을 톡, 또는 A/X 버튼으로 돌아가요.', 'Nice! Sometimes the DJ calls everyone to the floor and you get pulled out automatically. Now tap the "◀ TO THE BAR" sign or press A/X to go back.')); },
+    update() { if (H.loc === 'bar' && !H.moving) { HT.allowWalk = false; return true; } } },
+  { // 10 박수
     enter() { HT.ok = null;
       hTutSay(TR('마지막! 누가 바닥으로 끌려가면 로봇들은 박수를 쳐요. 같이 쳐야 해요 — R 키!', 'Last one! When someone gets dropped through the floor, robots applaud. You must clap too — press R!'),
         TR('마지막! 누가 바닥으로 끌려가면 로봇들은 박수를 쳐요. 같이 쳐야 해요 — 손을 머리 위로!', 'Last one! When someone gets dropped through the floor, robots applaud. You must clap too — raise a hand!')); },
@@ -4071,7 +4082,7 @@ const H_TUT_STEPS = [
       if (HT.ok === 'fail') { HT.ok = null; HT.t = 1; }
       return HT.ok === 'done' && HT.t > 4;
     } },
-  { // 9 끝
+  { // 11 끝
     enter() { hTutSay(TR('완벽해요. 이제 진짜 금요일 밤이에요. 땀 조심, 재채기 조심, 그리고... 너무 즐기지 마세요. 즐거우면 티가 나요.', 'Perfect. Now it\'s a real Friday night. Watch the sweat, watch the sneezes, and... don\'t enjoy it too much. Fun shows.')); },
     update() { if (HT.t > 7 && !HT.leaving) { HT.leaving = true; try { localStorage.setItem('overclock.humanTut', '1'); } catch {} G.fadeTo = 1; setTimeout(() => hStartNight(0), 800); } } },
 ];
@@ -4464,7 +4475,7 @@ const hWalkSign = new CanvasPanel(0.26, 0.085, 520, 170, { transparent: true });
 hWalkSign.mesh.renderOrder = 40; hWalkSign.material.fog = false; hWalkSign.mesh.visible = false;
 club.scene.add(hWalkSign.mesh);
 let hWalkKey = '';
-function hCanWalk() { return H.active && !H.ending && !H.between && !H.moving && !H.enc && !hFrozen() && !(H.freeze?.phase === 'warn') && !(H.walkCD > 0) && !H.tutorial; }
+function hCanWalk() { return H.active && !H.ending && !H.between && !H.moving && !H.enc && !hFrozen() && !(H.freeze?.phase === 'warn') && !(H.walkCD > 0) && (!H.tutorial || HT.allowWalk); }
 function hWalk() {
   if (!hCanWalk()) { audio.sfx('deny'); return; }
   const to = H.loc === 'bar' ? 'floor' : 'bar';
@@ -4545,7 +4556,7 @@ function hDanceTargets(dt) {
 
 function hWalkUpdate(dt) {
   H.walkCD = Math.max(0, (H.walkCD || 0) - dt);
-  const show = H.active && !H.ending && !H.between && !H.tutorial;
+  const show = H.active && !H.ending && !H.between && (!H.tutorial || HT.allowWalk);
   hWalkSign.mesh.visible = show && !H.moving;
   if (!show) return;
   // 지금 자리 앞 오른쪽 아래 (손 닿는 거리)
@@ -4679,8 +4690,8 @@ function drawHumanHud(beat, t) {
   else if (H.fbT > 0 && H.feedback) { big = H.feedback; col = /완벽|좋아|PERFECT|GOOD|통과|passed|참음|held|닦음|Wiped|로봇다운|Robotic|성공|Done|짝|Clap|승리|won/.test(big) ? '#7dffb0' : '#ff6a7a'; }
   if (big) hText(c, big, cx, 175, `900 40px ${FONT}`, col, 'center');
   if (e?.kind === 'act' && e.hold) { hPill(c, cx - 160, 205, 320, 14, 'rgba(0,0,0,.6)'); hPill(c, cx - 160, 205, 320 * Math.min(1, e.prog / e.hold), 14, '#7dffb0'); }
-  // ③ 리듬 레인 (플로어에서만, 얇게)
-  if (H.dancing) {
+  // ③ 리듬 레인 (플로어에서만, 얇게) — VR은 타깃 공이 대신하므로 숨김
+  if (H.dancing && !vr) {
     const L = cx - 360, R = cx + 360, Y = 262, hitX = L + 90, ppb = 130;
     c.strokeStyle = 'rgba(255,255,255,.25)'; c.lineWidth = 3; c.beginPath(); c.moveTo(L, Y); c.lineTo(R, Y); c.stroke();
     if (beat != null && !frozen) {
@@ -4985,7 +4996,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1009-h13', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h14', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
