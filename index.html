@@ -220,6 +220,7 @@ class CanvasPanel {
 const PSX = {
   club: { value: new THREE.Vector2(160, 120) }, // CCTV 속 클럽: 강하게
   room: { value: new THREE.Vector2(320, 240) }, // 보안실(데스크톱): 약하게, VR에선 꺼짐
+  aff: { value: 1 }, // 텍스처 아핀 왜곡 (1 켬 / 0 끔). 인간 모드 VR에선 우글거려서 끔
 };
 function psxify(mat, snap, affine = true) {
   if (!mat || mat.userData.psx || mat.isShaderMaterial || mat.isSpriteMaterial || mat.isLineBasicMaterial) return;
@@ -227,15 +228,15 @@ function psxify(mat, snap, affine = true) {
   if (mat.map?.image?.width >= 256) return; // 글자 텍스처는 선명하게
   mat.userData.psx = true;
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uSnap = snap;
+    sh.uniforms.uSnap = snap; sh.uniforms.uAff = PSX.aff;
     sh.defines = sh.defines || {};
     if (affine) sh.defines.PSX_AFFINE = '';
-    sh.vertexShader = 'uniform vec2 uSnap;\n#if defined(USE_MAP) && defined(PSX_AFFINE)\nvarying float vAffW;\n#endif\n' + sh.vertexShader
+    sh.vertexShader = 'uniform vec2 uSnap;\nuniform float uAff;\n#if defined(USE_MAP) && defined(PSX_AFFINE)\nvarying float vAffW;\n#endif\n' + sh.vertexShader
       .replace('#include <project_vertex>', `#include <project_vertex>
         if (uSnap.x > 0.0) { vec2 g = uSnap * 0.5; gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w; }`)
       .replace('#include <fog_vertex>', `#include <fog_vertex>
         #if defined(USE_MAP) && defined(PSX_AFFINE)
-          vMapUv *= gl_Position.w; vAffW = gl_Position.w;
+          vAffW = mix(1.0, gl_Position.w, uAff); vMapUv *= vAffW;
         #endif`);
     sh.fragmentShader = '#if defined(USE_MAP) && defined(PSX_AFFINE)\nvarying float vAffW;\n#endif\n' + sh.fragmentShader
       .replace('#include <map_fragment>', `#ifdef USE_MAP
@@ -2671,6 +2672,7 @@ const overlay = document.getElementById('overlay');
 // mode: 'tut' 튜토리얼(수습 근무) · 'play' 1일차부터 · 'hard' 하드 모드 · 'auto' 튜토리얼 안 했으면 튜토리얼 (VR 대기 화면의 확인 버튼)
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 function begin(mode = 'auto') {
+  PSX.aff.value = 1;
   if (G.state !== 'title') return;
   if (mode === 'auto') mode = lsGet('overclock.secTut') ? 'play' : 'tut';
   audio.init();
@@ -3044,7 +3046,7 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('selectstart', () => {
     if (G.state === 'end') { if (G.endT <= 0) location.reload(); return; }
     if (LOBBY.active) { lobbyGrab(c); return; }
-    if (H.active) { if (hRayChoose(c) || hTryGrabDrink(c)) return; if (H.enc?.kind === 'choice' && renderer.xr.isPresenting) return; humanHit(); return; }
+    if (H.active) { if (hRayChoose(c) || hTryGrabDrink(c)) return; if (H.enc?.kind === 'choice' && renderer.xr.isPresenting) return; if (renderer.xr.isPresenting && H.dancing && H.enc?.kind !== 'battle') return; humanHit(); return; } // VR 플로어: 트리거 말고 타깃에 손 대기
     const u = c.userData;
     if (u.isHand && tryGrab(c)) return; // 손: 핀치로 집기
     u.hold = u.ptr?.monitor ? { mon: u.ptr.monitor, t: 0 } : null;
@@ -4219,7 +4221,7 @@ function updateHuman(dt, t) {
   hVrUi(dt, t);
   hWalkUpdate(dt);
   hAlerts(dt);
-  hArmDance(dt);
+  hDanceTargets(dt);
   hVig.mesh.visible = !H.ending;
   { // 테두리 판을 실제 시야 크기에 맞춤 (VR은 시야가 넓어서 넉넉히)
     const hh = renderer.xr.isPresenting ? 0.36 : 0.3 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -4487,24 +4489,58 @@ function drawWalkSign() {
   hWalkSign.commit();
 }
 const _ws = new THREE.Vector3(), _wt = new THREE.Vector3();
-function hArmDance(dt) { // VR 플로어: 손을 아래로 휙 내리면 = 박자 한 번 (트리거도 그대로 됨)
-  H.armCD = Math.max(0, (H.armCD || 0) - dt);
-  if (!renderer.xr.isPresenting || !H.dancing || H.ending || H.moving || dt <= 0) return;
-  for (const c of controllers) {
-    const u = c.userData; if (!u.input) continue;
-    if (u.atFace) { u.armY = null; u.armReady = false; continue; } // 얼굴에 댄 손은 춤 판정 안 함
-    const src = u.isHand ? u.hand.joints?.wrist : c; if (!src) continue;
-    src.getWorldPosition(_cp);
-    if (u.armY == null) { u.armY = _cp.y; continue; }
-    const vy = (_cp.y - u.armY) / dt; u.armY = _cp.y;
-    u.armV = (u.armV ?? 0) * 0.5 + vy * 0.5; // 살짝 부드럽게
-    if (u.armV > -0.3) u.armReady = true;           // 올리거나 멈춤 → 다음 내려치기 준비
-    if (u.armReady && u.armV < -1.1 && H.armCD <= 0) { // 휙 내려침
-      u.armReady = false; H.armCD = 0.22;               // 두 손 동시에 내려도 한 번만
-      haptic(c, 0.4, 30); humanHit();
+// ── VR 플로어 춤: 박자마다 왼손(분홍) / 오른손(하늘) 타깃이 몸 앞에 뜸 → 박자에 맞춰 그 손을 타깃에 갖다 대기 ──
+const DANCE_POS = [ // 몸 기준 (오른쪽 +x, 위 +y: 눈 기준, 앞 +z) — 손별로 미러링
+  [0.28, -0.05, 0.42], [0.38, -0.3, 0.4], [0.22, -0.45, 0.45], [0.45, 0.08, 0.35], [0.12, 0.1, 0.48], [0.32, -0.6, 0.38],
+];
+const hTgtGeo = new THREE.SphereGeometry(0.055, 16, 12), hRingGeo = new THREE.TorusGeometry(0.09, 0.006, 6, 32);
+const hTargets = []; // 재사용 풀
+function hTarget(k) {
+  if (!hTargets[k]) {
+    const g = new THREE.Group();
+    const ball = new THREE.Mesh(hTgtGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false }));
+    const ring = new THREE.Mesh(hRingGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false }));
+    g.add(ball, ring); g.renderOrder = 45; g.visible = false; club.scene.add(g);
+    hTargets[k] = { g, ball, ring };
+  }
+  return hTargets[k];
+}
+const danceHand = (n) => (Math.floor(n / 2) % 2 ? 1 : 0) ^ (n % 2); // 왼 · 오 번갈아 (가끔 같은 손 두 번)
+const dancePos = (n) => DANCE_POS[((n * 7) % DANCE_POS.length + DANCE_POS.length) % DANCE_POS.length];
+const _tp = new THREE.Vector3(), _tq = new THREE.Vector3();
+function hDanceTargets(dt) {
+  const vr = renderer.xr.isPresenting, beat = audio.beat();
+  let used = 0;
+  if (vr && H.dancing && !H.ending && !H.moving && beat != null && !hFrozen()) {
+    const L = H_LOCS[H.loc], f = hFwd(L.yaw), r = hRight(L.yaw);
+    camera.getWorldPosition(_hp);
+    _tq.copy(L.pos); _tq.y = H_EYE; // 타깃 기준점: 내 자리의 눈높이 (머리를 따라 움직이지 않게)
+    const n0 = Math.floor(beat), n1 = Math.floor(beat + 1.6);
+    for (let n = n0; n <= n1; n++) {
+      if (n < 1 || hRest(n) || hGrace(n) || H.hits.has(n) || (H.danceEnd > 0 && n > H.danceEnd) || (H.freeze?.phase === 'warn')) continue;
+      const until = n - beat; // 남은 박 (음수 = 지남)
+      if (until < -0.35) continue;
+      const hand = danceHand(n), p = dancePos(n), side = hand ? 1 : -1;
+      _tp.copy(_tq).addScaledVector(r, p[0] * side).addScaledVector(f, p[2]); _tp.y += p[1];
+      const t = hTarget(used++);
+      t.g.position.copy(_tp); t.g.lookAt(_hp); t.g.visible = true;
+      const col = hand ? 0x39d8ff : 0xff4fa0, near = clamp(1 - until / 1.6, 0, 1);
+      t.ball.material.color.setHex(col); t.ball.material.opacity = 0.25 + 0.65 * near; t.ball.scale.setScalar(0.6 + 0.4 * near);
+      t.ring.material.color.setHex(col); t.ring.material.opacity = 0.9 * near; t.ring.scale.setScalar(1 + 2.2 * clamp(until, 0, 1.6)); // 링이 줄어들어 공에 닿는 순간 = 박자
+      // 판정: 그 손이 타깃에 닿았을 때 (박자 ±0.35박 안)
+      if (Math.abs(until) < 0.35) for (const c of controllers) {
+        const u = c.userData; if (!u.input || u.atFace) continue;
+        if ((u.input.handedness === 'left' ? 0 : 1) !== hand) continue;
+        const src = u.isHand ? (u.hand.joints?.['middle-finger-metacarpal'] || u.hand.joints?.wrist) : (u.ctrlHand?.root || c);
+        if (!src) continue;
+        src.getWorldPosition(_cp);
+        if (_cp.distanceTo(_tp) < 0.14) { haptic(c, 0.5, 35); humanHit(); break; }
+      }
     }
   }
+  for (let k = used; k < hTargets.length; k++) hTargets[k].g.visible = false;
 }
+
 function hWalkUpdate(dt) {
   H.walkCD = Math.max(0, (H.walkCD || 0) - dt);
   const show = H.active && !H.ending && !H.between && !H.tutorial;
@@ -4567,17 +4603,25 @@ function drawAlert(a) {
   if (a.bar != null) { c.fillStyle = 'rgba(255,255,255,.2)'; c.fillRect(136, h - 26, w - 176, 8); c.fillStyle = a.c; c.fillRect(136, h - 26, (w - 176) * clamp(a.bar, 0, 1), 8); }
   hAlert.commit();
 }
-function hWatchBeep() { // 감시 시작: 짧은 삐-삐 + 양손 진동
-  const a = audio.ctx; if (a) for (const [d, f] of [[0, 1320], [0.16, 1760]]) {
-    const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime + d;
-    o.type = 'square'; o.frequency.value = f;
-    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
-    o.connect(g); g.connect(audio.sfxG || a.destination); o.start(t0); o.stop(t0 + 0.14);
+function hWatchBeep() { // 감시 시작: 카메라가 돌아가는 '위잉~' + 낮은 '둥' (말 걸 때 소리와 다르게) + 양손 진동
+  const a = audio.ctx;
+  if (a) {
+    const t0 = a.currentTime, out = audio.sfxG || a.destination;
+    const o = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(140, t0); o.frequency.exponentialRampToValueAtTime(420, t0 + 0.45);
+    f.type = 'lowpass'; f.frequency.value = 900;
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    o.connect(f); f.connect(g); g.connect(out); o.start(t0); o.stop(t0 + 0.52);
+    const o2 = a.createOscillator(), g2 = a.createGain(), t1 = t0 + 0.5;
+    o2.type = 'sine'; o2.frequency.setValueAtTime(110, t1);
+    g2.gain.setValueAtTime(0.0001, t1); g2.gain.exponentialRampToValueAtTime(0.35, t1 + 0.02); g2.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.4);
+    o2.connect(g2); g2.connect(out); o2.start(t1); o2.stop(t1 + 0.42);
   }
-  for (const c of controllers) haptic(c, 0.9, 160);
+  for (const c of controllers) haptic(c, 0.9, 200);
 }
 function hAlerts(dt) {
   const vr = renderer.xr.isPresenting, live = H.active && !H.ending && !H.between;
+  PSX.aff.value = vr ? 0 : 1; if (vr) PSX.club.value.set(0, 0); // 인간 모드 VR: 우글거림 방지
   // 감시 알림: 시작할 때 삐-삐 + 강한 진동, 감시 중엔 1초마다 약한 진동
   const w = live && H.watch;
   if (w && !H.wasWatch) { hWatchBeep(); H.watchBuzzT = 1; }
@@ -4669,7 +4713,7 @@ function drawHumanHud(beat, t) {
   if (e && e.kind !== 'battle' && e.q && !(vr && e.p)) { c.font = SUB_FONT(26); lines = [{ t: e.who, sp: true }, ...wrapText(c, e.q, 690).slice(0, 3).map((t) => ({ t }))]; }
   else if (H.msgT > 0 && H.msg) { c.font = SUB_FONT(26); lines = wrapText(c, H.msg, 690).slice(0, 4).map((t) => ({ t })); }
   else if (H.night === 0 && H.t < 30) {
-    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 대답 = 레이+트리거 · 손 들기 = 박수 · 플로어: 팔을 박자에 맞춰 내리기 · Meta 버튼 길게 = 위치 재설정', 'Hand to face = wipe/cover/drink · answer = ray+trigger · raise hand = clap · floor: swing arms down on the beat · hold Meta button = recenter')
+    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 대답 = 레이+트리거 · 손 들기 = 박수 · 플로어: 박자마다 뜨는 공에 그 손 대기 (분홍=왼손 · 하늘=오른손) · Meta 버튼 길게 = 위치 재설정', 'Hand to face = wipe/cover/drink · answer = ray+trigger · raise hand = clap · floor: touch each orb on the beat (pink=left, cyan=right) · hold Meta button = recenter')
       : TR('F 꾹 = 닦기·가리기·마시기 · 1/2 = 대답 · R = 박수 · Space = 박자 · 드래그 = 둘러보기', 'Hold F = wipe/cover/drink · 1/2 = answer · R = clap · Space = beat · drag = look'), dim: true }];
   }
   if (lines.length) {
@@ -4937,7 +4981,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1009-h11', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h12', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
@@ -5411,6 +5455,7 @@ function pvpReserveSpots() { // 인간들이 서는 바 · 플로어 자리는 �
   }
 }
 function pvpBeginSec() {
+  PSX.aff.value = 1;
   audio.init();
   overlay.style.display = 'none'; document.getElementById('help').style.display = 'block';
   yaw = 0; pitch = -0.1; G.hard = false; G.complaints = 0;
