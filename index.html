@@ -4218,6 +4218,7 @@ function updateHuman(dt, t) {
   hFollowUI(dt);
   hVrUi(dt, t);
   hWalkUpdate(dt);
+  hAlerts(dt);
   hVig.mesh.visible = !H.ending;
   { // 테두리 판을 실제 시야 크기에 맞춤 (VR은 시야가 넓어서 넉넉히)
     const hh = renderer.xr.isPresenting ? 0.36 : 0.3 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -4490,6 +4491,66 @@ function hClickWalk() { // PC: 표지판 클릭
   hWalk(); return true;
 }
 
+// ── 눈앞 경고 · 감시 알림 · 눈높이 유지 ──
+// VR: 재채기 · 얼음(적외선) · 동결 스캔 같은 급한 일은 시선 바로 아래 작은 카드로 (머리에 붙어 따라옴)
+const hAlert = new CanvasPanel(0.34, 0.085, 680, 170, { transparent: true, depthTest: false });
+hAlert.mesh.renderOrder = 1000; hAlert.material.fog = false; hAlert.mesh.visible = false;
+hAlert.mesh.position.set(0, -0.13, -0.7); hAlert.mesh.rotation.x = 0.18;
+camera.add(hAlert.mesh);
+let hAlertKey = '';
+function hAlertInfo() {
+  if (H.ending || H.between) return null;
+  const vr = renderer.xr.isPresenting;
+  if (H.freeze?.phase === 'warn') return { icon: '❄', t: TR(`동결 스캔 ${Math.ceil(H.freeze.t)}초 전 — 멈출 준비`, `Freeze scan in ${Math.ceil(H.freeze.t)} — get ready`), c: '#6fc3ff' };
+  if (hFrozen()) return { icon: '■', t: TR('동결 — 움직이지 마!', 'FREEZE — don\'t move!'), c: '#6fc3ff' };
+  if (H.sneeze) return { icon: '!', t: TR(`재채기! ${Math.ceil(H.sneeze.t)}초 안에 얼굴 가려`, `Sneeze! Cover your face in ${Math.ceil(H.sneeze.t)}`) + (vr ? '' : ' (F)'), c: '#ffb02e', bar: H.sneeze.t / 4 };
+  if (H.bo && H.cool < 0.5) return { icon: '🧊', t: TR('적외선! 얼음잔을 얼굴에', 'INFRARED! Ice glass to your face') + (vr ? '' : ' (F)'), c: '#ff7a3a' };
+  if (H.bo) return { icon: '🧊', t: TR('식히는 중… 계속 대고 있어', 'Cooling… keep it there'), c: '#6fc3ff' };
+  return null;
+}
+function drawAlert(a) {
+  const key = a ? `${a.t}|${a.c}|${a.bar != null ? (a.bar * 10) | 0 : ''}` : ''; if (key === hAlertKey) return; hAlertKey = key;
+  const { ctx: c, w, h } = hAlert;
+  c.clearRect(0, 0, w, h);
+  if (!a) return hAlert.commit();
+  c.fillStyle = 'rgba(10,6,18,.86)'; roundRect(c, 4, 4, w - 8, h - 8, 34); c.fill();
+  c.strokeStyle = a.c; c.lineWidth = 6; roundRect(c, 4, 4, w - 8, h - 8, 34); c.stroke();
+  c.fillStyle = a.c; c.beginPath(); c.arc(72, h / 2, 44, 0, 7); c.fill();
+  c.fillStyle = '#10081a'; c.font = `900 50px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(a.icon, 72, h / 2 + 3);
+  c.fillStyle = '#ffffff'; c.font = `800 38px ${FONT}`; c.textAlign = 'left';
+  const lines = wrapText(c, a.t, w - 170).slice(0, 2); lines.forEach((l, i) => c.fillText(l, 136, h / 2 + (i - (lines.length - 1) / 2) * 44));
+  if (a.bar != null) { c.fillStyle = 'rgba(255,255,255,.2)'; c.fillRect(136, h - 26, w - 176, 8); c.fillStyle = a.c; c.fillRect(136, h - 26, (w - 176) * clamp(a.bar, 0, 1), 8); }
+  hAlert.commit();
+}
+function hWatchBeep() { // 감시 시작: 짧은 삐-삐 + 양손 진동
+  const a = audio.ctx; if (a) for (const [d, f] of [[0, 1320], [0.16, 1760]]) {
+    const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime + d;
+    o.type = 'square'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+    o.connect(g); g.connect(audio.sfxG || a.destination); o.start(t0); o.stop(t0 + 0.14);
+  }
+  for (const c of controllers) haptic(c, 0.9, 160);
+}
+function hAlerts(dt) {
+  const vr = renderer.xr.isPresenting, live = H.active && !H.ending && !H.between;
+  // 감시 알림: 시작할 때 삐-삐 + 강한 진동, 감시 중엔 1초마다 약한 진동
+  const w = live && H.watch;
+  if (w && !H.wasWatch) { hWatchBeep(); H.watchBuzzT = 1; }
+  if (w) { H.watchBuzzT -= dt; if (H.watchBuzzT <= 0) { H.watchBuzzT = 1; for (const c of controllers) haptic(c, 0.3, 70); } }
+  H.wasWatch = w;
+  // 눈앞 경고 카드 (VR만. PC는 기존 화면 안내)
+  const a = vr && live ? hAlertInfo() : null;
+  hAlert.mesh.visible = !!a;
+  H.alertT = (H.alertT || 0) - dt; if (H.alertT <= 0) { H.alertT = 0.1; drawAlert(a); }
+  // 눈높이 유지: 실제 눈높이가 1.65m에서 20cm 넘게 벗어난 채 0.8초 지나면 부드럽게 다시 맞춤
+  if (vr && H.active && !H.fall) {
+    camera.getWorldPosition(_hp);
+    const off = H_EYE - _hp.y;
+    H.eyeOffT = Math.abs(off) > 0.2 ? (H.eyeOffT || 0) + dt : 0;
+    if (H.eyeOffT > 0.8 || H.eyeFix) { H.eyeFix = Math.abs(off) > 0.01; rig.position.y += off * Math.min(1, dt * 4); if (!H.eyeFix) H.eyeOffT = 0; }
+  }
+}
+
 // ── HUD ─────────────────────────────
 // 그림자 있는 글자 (배경판 없이도 읽히게)
 function hText(c, s, x, y, font, color, align = 'left', outline = true) {
@@ -4583,10 +4644,6 @@ function drawHumanHud(beat, t) {
     hPill(c, gx + 70, gy + 14, 166, 16, 'rgba(0,20,40,.8)');
     hPill(c, gx + 70, gy + 14, 166 * Math.min(1, H.sweat / 100), 16, H.sweat > 70 ? '#4fb0ff' : '#2a6a9a');
     if (H.sweat > 60) hText(c, vr ? TR('얼굴에 손!', 'hand to face!') : TR('F 꾹', 'hold F'), gx + 256, gy + 22, `700 18px ${FONT}`, '#bfe9ff');
-  }
-  if (vr) { // 높이 진단 (임시): 기기 머리 높이 · rig 높이 · 실제 눈높이
-    camera.getWorldPosition(_hp);
-    hText(c, `DBG pose ${camera.position.y.toFixed(2)} rig ${rig.position.y.toFixed(2)} eye ${_hp.y.toFixed(2)} ref ${renderer.xr.getReferenceSpace?.() ? (renderer.xr._refType || '') : ''}`, cx, 20, `700 22px ${FONT}`, '#ffb02e', 'center');
   }
   hHud.commit();
 }
@@ -4835,7 +4892,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1006-h8', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h9', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
