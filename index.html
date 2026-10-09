@@ -3054,11 +3054,10 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('squeezeend', () => { const u = c.userData; if (u.lobbyHeld) return lobbyRelease(u); if (u.hDrink) return hReleaseDrink(u); if (!u.isHand) releaseItem(u); });
   c.addEventListener('squeezestart', () => {
     if (LOBBY.active) { lobbyGrab(c); return; } // 메인 화면: 그립은 디스크 잡기만 (테이블 위치는 안 바뀜)
-    if (H.active) { if (hTryGrabDrink(c)) return; hRecenter(); return; }
+    if (H.active) { hTryGrabDrink(c); return; } // 위치 재설정은 Meta 버튼 길게 (그립으론 안 바뀜)
     if (!c.userData.isHand && tryGrab(c)) return; // 컨트롤러: 그립으로 집기
     const mon = c.userData.ptr?.monitor;
     if (mon || room.focused) { room.toggleFocus(mon, camera); audio.sfx('click'); c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.3, 30); }
-    else recenter();
   });
   const grip = renderer.xr.getControllerGrip(i);
   rig.add(grip);
@@ -3072,6 +3071,8 @@ function recenter() {
   rig.position.set(XR_EYE.x - p.x, XR_EYE.y - p.y, XR_EYE.z - p.z);
 }
 renderer.xr.addEventListener('sessionstart', () => {
+  const rs = renderer.xr.getReferenceSpace();
+  rs?.addEventListener?.('reset', () => { G.recenterT = 0.15; }); // Meta 버튼 길게 눌러 위치 재설정 → 게임 안 위치도 다시 맞춤
   setTimeout(() => { drawDialog(); drawGuide(); }, 0); // 대사·그림을 VR용으로 갱신
   overlay.style.display = 'none';
   PSX.room.value.set(0, 0); // VR에선 보안실 스냅 끔 (양안 지글거림 → 멀미 방지)
@@ -4562,7 +4563,7 @@ function drawHumanHud(beat, t) {
   if (e && e.kind !== 'battle' && e.q && !(vr && e.p)) { c.font = SUB_FONT(26); lines = [{ t: e.who, sp: true }, ...wrapText(c, e.q, 690).slice(0, 3).map((t) => ({ t }))]; }
   else if (H.msgT > 0 && H.msg) { c.font = SUB_FONT(26); lines = wrapText(c, H.msg, 690).slice(0, 4).map((t) => ({ t })); }
   else if (H.night === 0 && H.t < 30) {
-    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 손 들기 = 대답·박수 · 그립 = 위치 재조정', 'Hand to face = wipe/cover/drink · raise hand = answer/clap · grip = recenter')
+    lines = [{ t: vr ? TR('손을 얼굴에 = 닦기·가리기·마시기 · 손 들기 = 대답·박수 · Meta 버튼 길게 = 위치 재설정', 'Hand to face = wipe/cover/drink · raise hand = answer/clap · hold Meta button = recenter')
       : TR('F 꾹 = 닦기·가리기·마시기 · 1/2 = 대답 · R = 박수 · Space = 박자 · 드래그 = 둘러보기', 'Hold F = wipe/cover/drink · 1/2 = answer · R = clap · Space = beat · drag = look'), dim: true }];
   }
   if (lines.length) {
