@@ -3585,7 +3585,7 @@ function hAddSus(v, why, allowDown = false) {
 const hRest = (n) => Math.floor(n / 4) % 4 === 3;
 const hFrozen = () => H.freeze && H.freeze.phase === 'on';
 const hGrace = (n) => n < H.grace;
-function humanHit() {
+function humanHit(soft = false) { // soft: VR 타깃으로 친 것 → 타이밍 판정 너그럽게
   if (!H.active || H.ending) return;
   if (H.enc?.kind === 'act' && H.enc.need === 'beat') return hActBeat();
   if (H.enc && H.enc.kind !== 'battle') return;
@@ -3593,7 +3593,7 @@ function humanHit() {
   if (hFrozen()) { H.freeze.moved = true; return hAddSus(12, TR('동결 중 움직임!', 'Moved during freeze!')); }
   if (!H.dancing) return; // 바에선 박자 없음 (PC: Space는 그냥 무시)
   // 한 손은 얼굴(재채기·얼음·땀), 다른 손으론 계속 춤출 수 있음 → 얼굴에 손 대고 있어도 박자 입력 받음
-  const n = Math.round(b), err = Math.abs(b - n) * 60 / (audio.liveBpm || 120);
+  const n = Math.round(b), err = Math.abs(b - n) * 60 / (audio.liveBpm || 120) * (soft ? 0.45 : 1);
   if (hGrace(n)) return;
   if (hRest(n)) return hAddSus(5, TR('쉬는 박인데 움직임', 'Moved on a rest'));
   if (H.hits.has(n)) return hAddSus(3, TR('두 번 침', 'Double hit'));
@@ -4183,7 +4183,7 @@ function updateHuman(dt, t) {
       if (beat - H.judged > 6) H.judged = Math.floor(beat);
       while (H.judged + lateBy < beat) {
         const n = H.judged++;
-        if (!hRest(n) && !hGrace(n) && !H.hits.has(n) && !(H.freeze && H.freeze.phase === 'warn')) {
+        if (!hRest(n) && !hGrace(n) && !hTgtSkip(n) && !H.hits.has(n) && !(H.freeze && H.freeze.phase === 'warn')) {
           PVP.acc *= 0.6; hAddSus(H.face > 0.2 ? 2 : 4, TR('박자 놓침', 'Missed beat'));
           if (++H.misses >= 4) { H.misses = 0; if (H.msgT <= 0) hChat(pick(HL.miss)); }
         } else if (H.hits.has(n)) H.misses = 0;
@@ -4490,8 +4490,8 @@ function drawWalkSign() {
 }
 const _ws = new THREE.Vector3(), _wt = new THREE.Vector3();
 // ── VR 플로어 춤: 박자마다 왼손(분홍) / 오른손(하늘) 타깃이 몸 앞에 뜸 → 박자에 맞춰 그 손을 타깃에 갖다 대기 ──
-const DANCE_POS = [ // 몸 기준 (오른쪽 +x, 위 +y: 눈 기준, 앞 +z) — 손별로 미러링
-  [0.28, -0.05, 0.42], [0.38, -0.3, 0.4], [0.22, -0.45, 0.45], [0.45, 0.08, 0.35], [0.12, 0.1, 0.48], [0.32, -0.6, 0.38],
+const DANCE_POS = [ // 몸 기준 (오른쪽 +x, 위 +y: 눈 기준, 앞 +z) — 손별로 미러링. 팔 뻗기 편한 곳만
+  [0.25, -0.2, 0.38], [0.3, -0.35, 0.35], [0.2, -0.05, 0.4], [0.32, -0.25, 0.32],
 ];
 const hTgtGeo = new THREE.SphereGeometry(0.055, 16, 12), hRingGeo = new THREE.TorusGeometry(0.09, 0.006, 6, 32);
 const hTargets = []; // 재사용 풀
@@ -4505,7 +4505,9 @@ function hTarget(k) {
   }
   return hTargets[k];
 }
-const danceHand = (n) => (Math.floor(n / 2) % 2 ? 1 : 0) ^ (n % 2); // 왼 · 오 번갈아 (가끔 같은 손 두 번)
+const danceHand = (n) => (n / 2) % 2 ? 1 : 0; // 짝수 박마다 왼 · 오 번갈아
+const hTgtMode = () => renderer.xr.isPresenting && H.dancing; // VR 플로어 = 타깃 모드
+const hTgtSkip = (n) => hTgtMode() && n % 2 !== 0; // 타깃 모드에선 홀수 박은 쉼 (안 쳐도 됨)
 const dancePos = (n) => DANCE_POS[((n * 7) % DANCE_POS.length + DANCE_POS.length) % DANCE_POS.length];
 const _tp = new THREE.Vector3(), _tq = new THREE.Vector3();
 function hDanceTargets(dt) {
@@ -4517,10 +4519,10 @@ function hDanceTargets(dt) {
     _tq.copy(L.pos); _tq.y = H_EYE; // 타깃 기준점: 내 자리의 눈높이 (머리를 따라 움직이지 않게)
     const n0 = Math.floor(beat), n1 = Math.floor(beat + 1.6);
     for (let n = n0; n <= n1; n++) {
-      if (n < 1 || hRest(n) || hGrace(n) || H.hits.has(n) || (H.danceEnd > 0 && n > H.danceEnd) || (H.freeze?.phase === 'warn')) continue;
+      if (n < 1 || hTgtSkip(n) || hRest(n) || hGrace(n) || H.hits.has(n) || (H.danceEnd > 0 && n > H.danceEnd) || (H.freeze?.phase === 'warn')) continue;
       const until = n - beat; // 남은 박 (음수 = 지남)
-      if (until < -0.35) continue;
-      const hand = danceHand(n), p = dancePos(n), side = hand ? 1 : -1;
+      if (until < -0.5) continue;
+      const hand = danceHand(n), p = dancePos(Math.floor(n / 4)), side = hand ? 1 : -1;
       _tp.copy(_tq).addScaledVector(r, p[0] * side).addScaledVector(f, p[2]); _tp.y += p[1];
       const t = hTarget(used++);
       t.g.position.copy(_tp); t.g.lookAt(_hp); t.g.visible = true;
@@ -4528,13 +4530,13 @@ function hDanceTargets(dt) {
       t.ball.material.color.setHex(col); t.ball.material.opacity = 0.25 + 0.65 * near; t.ball.scale.setScalar(0.6 + 0.4 * near);
       t.ring.material.color.setHex(col); t.ring.material.opacity = 0.9 * near; t.ring.scale.setScalar(1 + 2.2 * clamp(until, 0, 1.6)); // 링이 줄어들어 공에 닿는 순간 = 박자
       // 판정: 그 손이 타깃에 닿았을 때 (박자 ±0.35박 안)
-      if (Math.abs(until) < 0.35) for (const c of controllers) {
+      if (Math.abs(until) < 0.5) for (const c of controllers) { // 박자 ±0.5박 안에 닿으면 인정
         const u = c.userData; if (!u.input || u.atFace) continue;
         if ((u.input.handedness === 'left' ? 0 : 1) !== hand) continue;
         const src = u.isHand ? (u.hand.joints?.['middle-finger-metacarpal'] || u.hand.joints?.wrist) : (u.ctrlHand?.root || c);
         if (!src) continue;
         src.getWorldPosition(_cp);
-        if (_cp.distanceTo(_tp) < 0.14) { haptic(c, 0.5, 35); humanHit(); break; }
+        if (_cp.distanceTo(_tp) < 0.2) { haptic(c, 0.5, 35); humanHit(true); break; }
       }
     }
   }
@@ -4970,9 +4972,11 @@ function lobbyOptions() {
   const d = LOBBY.inserted; if (!d) return [];
   const info = DISC_INFO[d.kind], opts = [];
   if (d.kind === 'pvp') return [{ label: TR('감시로봇 (방 열기)', 'Security (host)') }, { label: TR('인간 대기열', 'Human queue') }, { label: TR('코드로 참가 · 인간', 'Join by code · Human') }];
-  if (!lsGet(info.tut)) opts.push({ mode: 'tut', label: TR('튜토리얼', 'Tutorial') });
+  const tut = { mode: 'tut', label: TR('튜토리얼', 'Tutorial') }, done = !!lsGet(info.tut);
+  if (!done) opts.push(tut); // 처음: 튜토리얼이 1번
   opts.push({ mode: 'play', label: TR('플레이', 'Play') });
   if (d.kind === 'oil') opts.push({ mode: 'hard', label: TR('하드 모드', 'Hard mode'), locked: !lsGet('overclock.cleared') });
+  if (done) opts.push(tut); // 깬 뒤에도 메뉴에 남김 (맨 뒤)
   return opts;
 }
 function lobbyDrawScreen(t) {
@@ -4981,7 +4985,7 @@ function lobbyDrawScreen(t) {
   c.textAlign = 'left'; c.textBaseline = 'top';
   const green = '#7dffb0', cursor = Math.sin(t * 6) > 0 ? '▌' : '';
   c.fillStyle = '#3a8a5a'; c.font = `600 18px ${FONT}`; c.fillText('OVERCLOCK OS v2.087', 18, 14);
-  c.textAlign = 'right'; c.fillText('build 1009-h12', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
+  c.textAlign = 'right'; c.fillText('build 1009-h13', w - 18, 14); // 퀘스트에서 최신 버전인지 확인용
   if (renderer.xr.isPresenting) { // 높이 진단: 눈(기기) · 눈(실제) · 테이블
     camera.getWorldPosition(_lv);
     c.fillStyle = '#ffb02e'; c.fillText(`eye ${camera.position.y.toFixed(2)} → ${_lv.y.toFixed(2)} · table ${STAND_Y.toFixed(2)}`, w - 18, 36);
